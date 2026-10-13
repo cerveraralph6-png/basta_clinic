@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hosplinic | Admin Portal</title>
+    <!-- Modern Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="/styles/admin.css">
+</head>
+<body>
+
+    <!-- Header -->
+    <header class="navbar">
+        <div class="navbar__brand">
+            <img src="/images/logo.png" alt="Hosplinic Logo" class="navbar__logo">
+            <h1 class="navbar__title">Hosplinic</h1>
+            <span class="admin-badge">Admin</span>
+        </div>
+        
+        <div class="navbar__actions">
+            <a href="/" class="btn btn--outline">Main Site</a>
+            <button class="btn btn--primary">Logout</button>
+        </div>
+    </header>
+
+    <!-- Main Clean Dashboard -->
+    <main class="dashboard">
+        <div class="dashboard__intro">
+            <h2>Administrative Operations</h2>
+            <p>Select a module below to inspect facility inventory or clinic analytics.</p>
+        </div>
+
+        <div class="dashboard__grid">
+            <!-- Card 1: Inventory Management -->
+            <div class="card" id="openInventoryModal" role="button" tabindex="0">
+                <div>
+                    <div class="card__icon card__icon--teal">
+                        <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                        </svg>
+                    </div>
+                    <h3 class="card__title">Inventory Management</h3>
+                    <p class="card__desc">Monitor medical supplies, view critical stock thresholds, and manage pharmacy reorders.</p>
+                    
+                    <!-- Clean summary pills -->
+                    <div class="pill-group">
+                        <span class="pill pill--ok">1,240 Total In Stock</span>
+                        <span class="pill pill--warn">4 Low Stock Alerts</span>
+                    </div>
+                </div>
+                <span class="card__link">Manage Inventory &rarr;</span>
+            </div>
+
+            <!-- Card 2: Reporting & Analytics -->
+            <div class="card" id="openAnalyticsModal" role="button" tabindex="0">
+                <div>
+                    <div class="card__icon card__icon--blue">
+                        <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                    </div>
+                    <h3 class="card__title">Reporting & Analytics</h3>
+                    <p class="card__desc">Track weekly patient volume, review operational efficiency, and export monthly clinic performance.</p>
+                    
+                    <!-- Clean summary pills -->
+                    <div class="pill-group">
+                        <span class="pill pill--ok">+14.2% Monthly Growth</span>
+                        <span class="pill pill--neutral">96% Satisfaction</span>
+                    </div>
+                </div>
+                <span class="card__link">View Analytics &rarr;</span>
+            </div>
+        </div>
+    </main>
+
+    <!-- ==========================================
+         MODAL 1: INVENTORY DETAILS
+         ========================================== -->
+    <div class="modal-overlay" id="inventoryModal" aria-hidden="true">
+        <div class="modal modal--wide">
+            <div class="modal__header">
+                <h3>Medical & Pharmacy Stock</h3>
+                <button class="modal__close" data-close="inventoryModal">&times;</button>
+            </div>
+            <div class="modal__body">
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Item Name</th>
+                                <th>Category</th>
+                                <th>Quantity</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>Amoxicillin 500mg</strong></td>
+                                <td>Antibiotic</td>
+                                <td>12 boxes</td>
+                                <td><span class="pill pill--danger">Critical Low</span></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Surgical Gloves (M)</strong></td>
+                                <td>PPE</td>
+                                <td>45 boxes</td>
+                                <td><span class="pill pill--ok">Optimal</span></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Sterile Syringes 5ml</strong></td>
+                                <td>Disposables</td>
+                                <td>18 pkts</td>
+                                <td><span class="pill pill--warn">Reorder Soon</span></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Paracetamol 500mg</strong></td>
+                                <td>Analgesic</td>
+                                <td>110 boxes</td>
+                                <td><span class="pill pill--ok">Optimal</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="modal-footer-actions">
+                    <button class="btn btn--primary">+ Add New Stock</button>
+                    <button class="btn btn--outline" data-close="inventoryModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================
+         MODAL 2: ANALYTICS DETAILS
+         ========================================== -->
+    <div class="modal-overlay" id="analyticsModal" aria-hidden="true">
+        <div class="modal modal--wide">
+            <div class="modal__header">
+                <h3>Clinic Performance & Trends</h3>
+                <button class="modal__close" data-close="analyticsModal">&times;</button>
+            </div>
+            <div class="modal__body">
+                <!-- Mini Stats Bar -->
+                <div class="analytics-stats">
+                    <div class="stat-item">
+                        <small>Avg Wait Time</small>
+                        <strong>14 mins</strong>
+                    </div>
+                    <div class="stat-item">
+                        <small>Monthly Visits</small>
+                        <strong>620</strong>
+                    </div>
+                    <div class="stat-item">
+                        <small>Satisfaction</small>
+                        <strong>96.4%</strong>
+                    </div>
+                </div>
+
+                <!-- Visual Chart -->
+                <div class="chart-box">
+                    <div class="chart-header">
+                        <span>Daily Patient Consultations (This Week)</span>
+                    </div>
+                    <div class="chart-bars">
+                        <div class="chart-col"><div class="chart-bar" style="height: 45px;"></div><span>Mon</span></div>
+                        <div class="chart-col"><div class="chart-bar" style="height: 70px;"></div><span>Tue</span></div>
+                        <div class="chart-col"><div class="chart-bar" style="height: 55px;"></div><span>Wed</span></div>
+                        <div class="chart-col"><div class="chart-bar" style="height: 95px; background: var(--accent-teal);"></div><span>Thu</span></div>
+                        <div class="chart-col"><div class="chart-bar" style="height: 80px;"></div><span>Fri</span></div>
+                        <div class="chart-col"><div class="chart-bar" style="height: 40px;"></div><span>Sat</span></div>
+                        <div class="chart-col"><div class="chart-bar" style="height: 25px;"></div><span>Sun</span></div>
+                    </div>
+                </div>
+
+                <div class="modal-footer-actions">
+                    <button class="btn btn--primary">Export CSV Report</button>
+                    <button class="btn btn--outline" data-close="analyticsModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <p>&copy; 2025 Hosplinic Management System &bull; Admin Portal</p>
+    </footer>
+
+    <!-- Modal Script Logic -->
+    <script>
+        function openModal(id) {
+            const modal = document.getElementById(id);
+            if (modal) {
+                modal.classList.add('active');
+                modal.setAttribute('aria-hidden', 'false');
+                document.body.style.overflow = 'hidden';
+            }
+        }
+
+        function closeModal(id) {
+            const modal = document.getElementById(id);
+            if (modal) {
+                modal.classList.remove('active');
+                modal.setAttribute('aria-hidden', 'true');
+                document.body.style.overflow = '';
+            }
+        }
+
+        // Open triggers
+        document.getElementById('openInventoryModal').addEventListener('click', () => openModal('inventoryModal'));
+        document.getElementById('openAnalyticsModal').addEventListener('click', () => openModal('analyticsModal'));
+
+        // Close triggers
+        document.querySelectorAll('[data-close]').forEach(btn => {
+            btn.addEventListener('click', () => closeModal(btn.getAttribute('data-close')));
+        });
+
+        // Close when clicking background
+        document.querySelectorAll('.modal-overlay').forEach(overlay => {
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) closeModal(overlay.id);
+            });
+        });
+
+        // Close with Esc key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal-overlay.active').forEach(modal => closeModal(modal.id));
+            }
+        });
+    </script>
+</body>
+</html>

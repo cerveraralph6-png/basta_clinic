@@ -1,0 +1,462 @@
+/* ==========================================
+   1. DESIGN TOKENS
+   ========================================== */
+:root {
+  --primary: #0284c7;        /* Medical Sky Blue */
+  --primary-dark: #0369a1;
+  --primary-light: #e0f2fe;
+
+  --accent-teal: #0d9488;
+  --accent-light: #ccfbf1;
+
+  --bg-body: #f8fafc;
+  --bg-surface: #ffffff;
+
+  --text-dark: #0f172a;
+  --text-body: #475569;
+  --text-muted: #94a3b8;
+
+  --border-subtle: #e2e8f0;
+
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 8px 24px -4px rgba(15, 23, 42, 0.06);
+  --shadow-hover: 0 16px 32px -8px rgba(2, 132, 199, 0.18);
+
+  --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ==========================================
+   2. RESET & BASE
+   ========================================== */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--bg-body);
+  color: var(--text-body);
+  line-height: 1.6;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ==========================================
+   3. NAVBAR
+   ========================================== */
+.navbar {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 1rem 5%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.navbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.navbar__logo {
+  height: 38px;
+  width: auto;
+  object-fit: contain;
+  border-radius: 50%;
+}
+
+.navbar__title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-dark);
+}
+
+.admin-badge {
+  background-color: #fef3c7;
+  color: #b45309;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.navbar__actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.875rem;
+  padding: 0.65rem 1.3rem;
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+  transition: var(--transition);
+}
+
+.btn--primary {
+  background-color: var(--primary);
+  color: #ffffff;
+}
+
+.btn--primary:hover {
+  background-color: var(--primary-dark);
+  transform: translateY(-1px);
+}
+
+.btn--outline {
+  background-color: transparent;
+  color: var(--text-body);
+  border: 1px solid var(--border-subtle);
+}
+
+.btn--outline:hover {
+  background-color: #f1f5f9;
+  color: var(--text-dark);
+}
+
+/* ==========================================
+   4. DASHBOARD & 2 CARDS
+   ========================================== */
+.dashboard {
+  flex: 1;
+  max-width: 1000px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 3.5rem 1.5rem;
+}
+
+.dashboard__intro {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+
+.dashboard__intro h2 {
+  font-size: 2rem;
+  color: var(--text-dark);
+  margin-bottom: 0.4rem;
+}
+
+.dashboard__intro p {
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+
+.dashboard__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 2rem;
+}
+
+/* Cards */
+.card {
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  padding: 2.25rem 2rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: var(--shadow-md);
+  transition: var(--transition);
+  cursor: pointer;
+}
+
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-hover);
+  border-color: rgba(2, 132, 199, 0.4);
+}
+
+.card__icon {
+  width: 50px;
+  height: 50px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1.25rem;
+}
+
+.card__icon--blue {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.card__icon--teal {
+  background: var(--accent-light);
+  color: var(--accent-teal);
+}
+
+.card__title {
+  font-size: 1.3rem;
+  color: var(--text-dark);
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.card__desc {
+  color: var(--text-body);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin-bottom: 1.5rem;
+}
+
+/* Micro Status Pills inside Cards */
+.pill-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.75rem;
+}
+
+.pill {
+  font-size: 0.775rem;
+  font-weight: 600;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+}
+
+.pill--ok {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.pill--warn {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.pill--danger {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.pill--neutral {
+  background: #f1f5f9;
+  color: var(--text-body);
+}
+
+.card__link {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  transition: var(--transition);
+}
+
+.card:hover .card__link {
+  color: var(--primary-dark);
+  gap: 0.6rem;
+}
+
+/* ==========================================
+   5. MODAL SYSTEM
+   ========================================== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1.5rem;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+
+.modal-overlay.active {
+  opacity: 1;
+  visibility: visible;
+}
+
+.modal {
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  max-width: 500px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  transform: scale(0.95) translateY(10px);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal--wide {
+  max-width: 680px;
+}
+
+.modal-overlay.active .modal {
+  transform: scale(1) translateY(0);
+}
+
+.modal__header {
+  padding: 1.25rem 1.75rem;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal__header h3 {
+  font-size: 1.25rem;
+  color: var(--text-dark);
+  font-weight: 700;
+}
+
+.modal__close {
+  background: transparent;
+  border: none;
+  font-size: 1.75rem;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 6px;
+  transition: var(--transition);
+}
+
+.modal__close:hover {
+  color: var(--text-dark);
+  background-color: #f1f5f9;
+}
+
+.modal__body {
+  padding: 1.75rem;
+}
+
+.modal-footer-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+/* ==========================================
+   6. ON-DEMAND MODAL DATA (TABLE & CHARTS)
+   ========================================== */
+.table-wrapper {
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  text-align: left;
+}
+
+.data-table th {
+  background-color: var(--bg-body);
+  color: var(--text-muted);
+  font-weight: 600;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.data-table td {
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* Analytics Chart Components */
+.chart-box {
+  background: var(--bg-body);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  border: 1px solid var(--border-subtle);
+  margin-top: 1rem;
+}
+
+.chart-header {
+  font-size: 0.825rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+
+.chart-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  height: 120px;
+}
+
+.chart-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.chart-bar {
+  width: 22px;
+  background: var(--primary);
+  border-radius: 4px 4px 0 0;
+}
+
+.chart-col span {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.analytics-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  text-align: center;
+}
+
+.stat-item {
+  background: var(--bg-body);
+  padding: 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+}
+
+.stat-item small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.stat-item strong {
+  font-size: 1.15rem;
+  color: var(--text-dark);
+}
+
+/* ==========================================
+   7. FOOTER
+   ========================================== */
+.footer {
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+  padding: 1.5rem;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin-top: auto;
+}
