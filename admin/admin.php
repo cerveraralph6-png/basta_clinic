@@ -11,17 +11,23 @@ $admin_name = htmlspecialchars($_SESSION['user_name'] ?? 'Administrator');
 $staff_msg = '';
 $staff_error = '';
 
-
+// ==========================================
+// HANDLE STAFF (DOCTOR / ADMIN) REGISTRATION
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'register_staff') {
     $fullName    = trim($_POST['fullName'] ?? '');
     $identifier  = trim($_POST['identifier'] ?? '');
     $phoneNumber = trim($_POST['phoneNumber'] ?? '');
     $role        = $_POST['role'] ?? 'doctor';
+    $department  = trim($_POST['department'] ?? '');
     $password    = $_POST['password'] ?? '';
     $confirmPass = $_POST['confirmPassword'] ?? '';
 
+    // Department is strictly required if the account is a Doctor
     if (empty($fullName) || empty($identifier) || empty($phoneNumber) || empty($password)) {
-        $staff_error = "All fields are required.";
+        $staff_error = "All basic fields are required.";
+    } elseif ($role === 'doctor' && empty($department)) {
+        $staff_error = "Medical Department is required for Doctor accounts.";
     } elseif ($password !== $confirmPass) {
         $staff_error = "Passwords do not match.";
     } elseif (strlen($password) < 6) {
@@ -36,9 +42,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         } else {
             $hashedPass = password_hash($password, PASSWORD_BCRYPT);
             
+            // If admin and department was left blank, store as NULL
+            $finalDept = ($role === 'doctor' || !empty($department)) ? $department : null;
+
             $insertStmt = $pdo->prepare("
-                INSERT INTO users (full_name, identifier, phone_number, password_hash, role)
-                VALUES (:full_name, :identifier, :phone_number, :password_hash, :role)
+                INSERT INTO users (full_name, identifier, phone_number, password_hash, role, department)
+                VALUES (:full_name, :identifier, :phone_number, :password_hash, :role, :department)
             ");
             
             $created = $insertStmt->execute([
@@ -46,11 +55,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 ':identifier'   => $identifier,
                 ':phone_number'  => $phoneNumber,
                 ':password_hash' => $hashedPass,
-                ':role'          => $role
+                ':role'          => $role,
+                ':department'    => $finalDept
             ]);
 
             if ($created) {
-                $staff_msg = ucfirst($role) . " account for '$fullName' created successfully!";
+                $roleLabel = ucfirst($role);
+                $deptLabel = !empty($finalDept) ? " ($finalDept)" : "";
+                $staff_msg = "$roleLabel account for '$fullName'$deptLabel created successfully!";
             } else {
                 $staff_error = "Failed to create account. Please try again.";
             }
@@ -113,7 +125,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     </style>
 </head>
 <body>
-
 
     <header class="navbar">
         <div class="navbar__brand">
@@ -185,6 +196,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         </div>
     </main>
 
+    <!-- ==========================================
+         STAFF REGISTRATION MODAL
+         ========================================== -->
     <div class="modal-overlay" id="staffModal" aria-hidden="true">
         <div class="modal">
             <div class="modal__header">
@@ -195,12 +209,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 <form action="admin.php" method="POST" class="staff-form">
                     <input type="hidden" name="action" value="register_staff">
 
+                    <!-- Role Selection -->
                     <div class="form-group">
                         <label for="role">Account Role</label>
                         <select name="role" id="role" required>
                             <option value="doctor">Doctor (Physician)</option>
                             <option value="admin">Administrator</option>
                         </select>
+                    </div>
+
+                    <!-- Medical Department (Required for Doctor, Optional for Admin) -->
+                    <div class="form-group" id="deptGroup">
+                        <label for="department">
+                            Medical Department <span id="deptRequiredStar" style="color: #dc2626;">*</span>
+                        </label>
+                        <select name="department" id="department" required>
+                            <option value="">-- Choose Department --</option>
+                            <option value="Cardiology">Cardiology</option>
+                            <option value="Pediatrics">Pediatrics</option>
+                            <option value="Dermatology">Dermatology</option>
+                            <option value="General Medicine">General Medicine</option>
+                        </select>
+                        <small id="deptOptionalNotice" style="font-size: 0.75rem; color: var(--text-muted); display: none;">
+                            (Optional for Administrator accounts)
+                        </small>
                     </div>
 
                     <div class="form-group">
@@ -237,6 +269,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         </div>
     </div>
 
+    <!-- Inventory Modal -->
     <div class="modal-overlay" id="inventoryModal" aria-hidden="true">
         <div class="modal modal--wide">
             <div class="modal__header">
@@ -277,6 +310,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         </div>
     </div>
 
+    <!-- Analytics Modal -->
     <div class="modal-overlay" id="analyticsModal" aria-hidden="true">
         <div class="modal modal--wide">
             <div class="modal__header">
@@ -301,6 +335,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     </footer>
 
     <script>
+        // ==========================================
+        // DYNAMIC DEPARTMENT REQUIREMENT TOGGLE
+        // ==========================================
+        const roleSelect = document.getElementById('role');
+        const deptSelect = document.getElementById('department');
+        const deptRequiredStar = document.getElementById('deptRequiredStar');
+        const deptOptionalNotice = document.getElementById('deptOptionalNotice');
+
+        function toggleDepartmentRequirement() {
+            if (roleSelect.value === 'doctor') {
+                deptSelect.required = true;
+                deptRequiredStar.style.display = 'inline';
+                deptOptionalNotice.style.display = 'none';
+            } else {
+                deptSelect.required = false;
+                deptRequiredStar.style.display = 'none';
+                deptOptionalNotice.style.display = 'block';
+            }
+        }
+
+        roleSelect.addEventListener('change', toggleDepartmentRequirement);
+        // Run on initial load
+        toggleDepartmentRequirement();
+
+        // Modal Open / Close Logic
         function openModal(id) {
             const modal = document.getElementById(id);
             if (modal) {
@@ -319,11 +378,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             }
         }
 
-
         document.getElementById('openStaffModal').addEventListener('click', () => openModal('staffModal'));
         document.getElementById('openInventoryModal').addEventListener('click', () => openModal('inventoryModal'));
         document.getElementById('openAnalyticsModal').addEventListener('click', () => openModal('analyticsModal'));
-
 
         document.querySelectorAll('[data-close]').forEach(btn => {
             btn.addEventListener('click', () => closeModal(btn.getAttribute('data-close')));
