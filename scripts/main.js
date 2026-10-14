@@ -1,4 +1,4 @@
-        // Modal System Logic
+
         function openModal(id) {
             const modal = document.getElementById(id);
             if (modal) {
@@ -17,7 +17,6 @@
             }
         }
 
-        // Open Modal Triggers
         document.getElementById('openLoginModal').addEventListener('click', () => openModal('loginModal'));
         document.getElementById('openRegisterModal').addEventListener('click', () => openModal('registerModal'));
         document.getElementById('openScheduleModal').addEventListener('click', () => {
@@ -25,7 +24,6 @@
             renderCalendar();
         });
 
-        // Switch between Login and Registration Modals
         document.getElementById('switchToRegister').addEventListener('click', (e) => {
             e.preventDefault();
             closeModal('loginModal');
@@ -38,26 +36,22 @@
             openModal('loginModal');
         });
 
-        // Close triggers by [data-close] attribute
         document.querySelectorAll('[data-close]').forEach(btn => {
             btn.addEventListener('click', () => closeModal(btn.getAttribute('data-close')));
         });
 
-        // Close on background overlay click
         document.querySelectorAll('.modal-overlay').forEach(overlay => {
             overlay.addEventListener('click', (e) => {
                 if (e.target === overlay) closeModal(overlay.id);
             });
         });
 
-        // Close on Escape key
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 document.querySelectorAll('.modal-overlay.active').forEach(overlay => closeModal(overlay.id));
             }
         });
 
-        // Password matching validation
         const form = document.getElementById('registrationForm');
         const password = document.getElementById('password');
         const confirmPassword = document.getElementById('confirmPassword');
@@ -73,9 +67,6 @@
             }
         });
 
-        // ==========================================
-        // CALENDAR LOGIC
-        // ==========================================
         let currentDate = new Date();
         let selectedDate = new Date();
 

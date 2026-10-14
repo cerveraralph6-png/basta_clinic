@@ -39,7 +39,7 @@
 
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  background: url(/images/bg1.jpg) no-repeat center center/cover;
+  background: url(../images/bg1.jpg) no-repeat center center/cover;
   background-color: var(--bg-body);
   color: var(--text-body);
   line-height: 1.6;
