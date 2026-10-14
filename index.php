@@ -255,11 +255,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     </div>
 
     <div class="modal-overlay" id="registerModal" aria-hidden="true" >
-        <div class="modal" style="  
-        background: url(images/logo.png);
-        background-repeat: no-repeat;
-        background-size: cover;
-        background-position: center;">
+        <div class="modal">
 
 
             <div class="modal__header">
@@ -268,7 +264,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             </div>
             
             <div class="modal__body">
-                <!-- Registration Error Feedback -->
+
                 <?php if (!empty($auth_error) && $open_modal_on_load === 'registerModal'): ?>
                     <div class="alert alert--error"><?= htmlspecialchars($auth_error) ?></div>
                 <?php endif; ?>
