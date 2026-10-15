@@ -1,0 +1,339 @@
+-- phpMyAdmin SQL Dump
+-- version 5.2.1
+-- https://www.phpmyadmin.net/
+--
+-- Host: 127.0.0.1
+-- Generation Time: Oct 15, 2026 at 04:39 AM
+-- Server version: 10.4.32-MariaDB
+-- PHP Version: 8.0.30
+
+SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
+START TRANSACTION;
+SET time_zone = "+00:00";
+
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!40101 SET NAMES utf8mb4 */;
+
+--
+-- Database: `hosplinic_db`
+--
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `appointments`
+--
+
+CREATE TABLE `appointments` (
+  `id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `doctor_id` int(11) DEFAULT NULL,
+  `booking_code` varchar(30) DEFAULT NULL,
+  `department` varchar(100) NOT NULL,
+  `doctor_name` varchar(100) NOT NULL,
+  `appointment_datetime` datetime NOT NULL,
+  `reason` text DEFAULT NULL,
+  `attachment_path` varchar(255) DEFAULT NULL,
+  `attachment_name` varchar(255) DEFAULT NULL,
+  `cancellation_reason` text DEFAULT NULL,
+  `status` enum('Confirmed','Pending','Completed','Cancelled') DEFAULT 'Confirmed',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `appointments`
+--
+
+INSERT INTO `appointments` (`id`, `user_id`, `doctor_id`, `booking_code`, `department`, `doctor_name`, `appointment_datetime`, `reason`, `attachment_path`, `attachment_name`, `cancellation_reason`, `status`, `created_at`) VALUES
+(8, 15, NULL, 'HSP-2610-2838', 'General Medicine', 'Ralph Cervera', '2026-10-16 23:30:00', 'symptoms', NULL, NULL, 'No reason provided by patient', 'Cancelled', '2026-10-14 15:30:18'),
+(9, 15, 14, 'HSP-2610-1700', 'General Medicine', 'Ralph Cervera', '2026-10-16 23:51:00', '1', NULL, NULL, 'No reason provided by patient', 'Cancelled', '2026-10-14 15:51:13'),
+(10, 15, 14, 'HSP-2610-7265', 'General Medicine', 'Ralph Cervera', '2026-10-15 23:58:00', '1', NULL, NULL, 'No reason provided by patient', 'Cancelled', '2026-10-14 15:58:41'),
+(11, 15, 14, 'HSP-2610-2613', 'General Medicine', 'Ralph Cervera', '2026-10-16 00:34:00', 'concerned about this', 'uploads/attach_6acfaf3e9d3ba.jpg', 'images.jpg', 'No reason provided by patient', 'Cancelled', '2026-10-14 16:35:10'),
+(12, 15, NULL, 'HSP-2610-1737', 'General Medicine', 'On-Duty Clinical Staff (General Medicine)', '2026-10-19 00:43:00', 'illness', NULL, NULL, 'No reason provided by patient', 'Cancelled', '2026-10-14 16:43:55'),
+(13, 15, 17, 'HSP-2610-4109', 'General Medicine', 'Jansen Quinones', '2026-10-20 13:00:00', '1', 'uploads/attach_6ad0135370e84.jpg', 'images.jpg', NULL, 'Confirmed', '2026-10-14 23:42:11');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `billings`
+--
+
+CREATE TABLE `billings` (
+  `id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `appointment_id` int(11) DEFAULT NULL,
+  `invoice_number` varchar(50) NOT NULL,
+  `description` varchar(255) NOT NULL,
+  `base_fee` decimal(10,2) DEFAULT 500.00,
+  `lab_name` varchar(150) DEFAULT NULL,
+  `lab_fee` decimal(10,2) DEFAULT 0.00,
+  `lab_status` enum('none','pending','accepted','declined') DEFAULT 'none',
+  `total_amount` decimal(10,2) NOT NULL,
+  `payment_status` enum('Unpaid','Paid') DEFAULT 'Unpaid',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `billings`
+--
+
+INSERT INTO `billings` (`id`, `user_id`, `appointment_id`, `invoice_number`, `description`, `base_fee`, `lab_name`, `lab_fee`, `lab_status`, `total_amount`, `payment_status`, `created_at`) VALUES
+(7, 15, 8, 'INV-20261014-5443', 'Cancellation Penalty [HSP-2610-2838] - Ralph Cervera', 50.00, 'Complete Blood Count (CBC) & Urinalysis', 0.00, 'declined', 50.00, 'Paid', '2026-10-14 15:30:18'),
+(8, 15, 9, 'INV-20261014-9698', 'Cancellation Penalty [HSP-2610-1700] - Ralph Cervera', 50.00, 'Complete Blood Count (CBC) & Urinalysis', 0.00, 'declined', 50.00, 'Paid', '2026-10-14 15:51:13'),
+(9, 15, 10, 'INV-20261014-4359', 'Cancellation Penalty [HSP-2610-7265] - Ralph Cervera', 50.00, 'Complete Blood Count (CBC) & Urinalysis', 0.00, 'declined', 50.00, 'Paid', '2026-10-14 15:58:41'),
+(10, 15, 11, 'INV-20261014-5534', 'Cancellation Penalty [HSP-2610-2613] - Ralph Cervera', 50.00, 'Complete Blood Count (CBC) & Urinalysis', 0.00, 'declined', 50.00, 'Paid', '2026-10-14 16:35:10'),
+(11, 15, 12, 'INV-20261014-9958', 'Consultation [HSP-2610-1737] - General Medicine (Ralph Cervera)', 500.00, 'Complete Blood Count (CBC) & Urinalysis', 350.00, 'accepted', 850.00, 'Paid', '2026-10-14 16:43:55'),
+(12, 15, 13, 'INV-20261015-2973', 'Consultation [HSP-2610-4109] - General Medicine (Jansen Quinones)', 500.00, 'Complete Blood Count (CBC) & Urinalysis', 350.00, 'pending', 500.00, 'Unpaid', '2026-10-14 23:42:11');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `doctor_unavailability_logs`
+--
+
+CREATE TABLE `doctor_unavailability_logs` (
+  `id` int(11) NOT NULL,
+  `doctor_id` int(11) NOT NULL,
+  `appointment_id` int(11) NOT NULL,
+  `reassigned_doctor_id` int(11) DEFAULT NULL,
+  `reason` varchar(255) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `doctor_unavailability_logs`
+--
+
+INSERT INTO `doctor_unavailability_logs` (`id`, `doctor_id`, `appointment_id`, `reassigned_doctor_id`, `reason`, `created_at`) VALUES
+(1, 14, 12, NULL, 'Emergency Procedure / Surgery', '2026-10-14 21:37:08');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `medical_records`
+--
+
+CREATE TABLE `medical_records` (
+  `id` int(11) NOT NULL,
+  `patient_id` int(11) NOT NULL,
+  `doctor_id` int(11) NOT NULL,
+  `title` varchar(150) NOT NULL,
+  `diagnosis_notes` text DEFAULT NULL,
+  `file_name` varchar(255) NOT NULL,
+  `file_path` varchar(255) NOT NULL,
+  `file_size` varchar(50) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `medical_records`
+--
+
+INSERT INTO `medical_records` (`id`, `patient_id`, `doctor_id`, `title`, `diagnosis_notes`, `file_name`, `file_path`, `file_size`, `created_at`) VALUES
+(1, 15, 14, '1', '1', 'images.jpg', 'uploads/record_6acfaf9fb414b.jpg', '16.5 KB', '2026-10-14 16:36:47');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `notifications`
+--
+
+CREATE TABLE `notifications` (
+  `id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `title` varchar(150) NOT NULL,
+  `message` text NOT NULL,
+  `type` enum('confirmed','comment','reminder') DEFAULT 'confirmed',
+  `is_read` tinyint(1) DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `notifications`
+--
+
+INSERT INTO `notifications` (`id`, `user_id`, `title`, `message`, `type`, `is_read`, `created_at`) VALUES
+(15, 15, 'Appointment Booked', 'Your visit with Ralph Cervera is confirmed. Reference Code: HSP-2610-2838.', 'confirmed', 0, '2026-10-14 15:30:18'),
+(16, 15, 'Appointment Submitted (Pending)', 'Your visit with Ralph Cervera is currently Pending doctor confirmation. Reference: HSP-2610-1700.', 'reminder', 0, '2026-10-14 15:51:13'),
+(17, 15, 'Appointment Confirmed', 'Dr. Ralph Cervera confirmed your consultation [HSP-2610-1700]. We look forward to seeing you!', 'confirmed', 0, '2026-10-14 15:51:42'),
+(18, 15, 'Appointment Submitted (Pending)', 'Your visit with Ralph Cervera is currently Pending doctor confirmation. Reference: HSP-2610-7265.', 'reminder', 0, '2026-10-14 15:58:41'),
+(19, 15, 'Appointment Confirmed', 'Dr. Ralph Cervera confirmed your consultation [HSP-2610-7265]. We look forward to seeing you!', 'confirmed', 0, '2026-10-14 15:59:15'),
+(20, 15, 'Appointment Confirmed', 'Dr. Ralph Cervera confirmed your consultation [HSP-2610-7265]. We look forward to seeing you!', 'confirmed', 0, '2026-10-14 16:14:30'),
+(21, 15, 'Appointment Submitted (Pending)', 'Your visit with Ralph Cervera is currently Pending doctor confirmation. Reference: HSP-2610-2613.', 'reminder', 0, '2026-10-14 16:35:10'),
+(22, 15, 'Appointment Confirmed', 'Dr. Ralph Cervera confirmed your consultation [HSP-2610-2613]. We look forward to seeing you!', 'confirmed', 0, '2026-10-14 16:35:56'),
+(23, 15, 'New Medical Document Available', 'Ralph Cervera uploaded a new record: 1. You can now download it under Diagnosis & Records.', 'confirmed', 0, '2026-10-14 16:36:47'),
+(24, 15, 'Appointment Submitted (Pending)', 'Your visit with Ralph Cervera is currently Pending doctor confirmation. Reference: HSP-2610-1737.', 'reminder', 0, '2026-10-14 16:43:55'),
+(25, 14, 'Appointment Cancelled by Patient', 'Patient 1 cancelled their consultation [HSP-2610-2613] scheduled for Oct 16, 2026 12:34 AM. Reason: No reason provided by patient', 'comment', 0, '2026-10-14 16:45:54'),
+(26, 15, 'Appointment Cancelled (Fine Applied)', 'Cancelled booking [HSP-2610-2613] with Ralph Cervera. A ₱50.00 reservation fee was applied to your billing.', 'comment', 0, '2026-10-14 16:45:54'),
+(27, 1, 'Doctor Unavailability Alert', 'Incident Alert: Ralph Cervera declared unavailable for booking [HSP-2610-1737]. Reassigned to On-Duty Clinical Staff (General Medicine). (Total Doctor Strikes: 1). Reason: Emergency Procedure / Surgery', 'comment', 0, '2026-10-14 21:37:08'),
+(28, 15, 'Physician Reassigned', 'Dr. Ralph Cervera was unavailable for booking [HSP-2610-1737]. You have been successfully reassigned to On-Duty Clinical Staff (General Medicine).', 'reminder', 0, '2026-10-14 21:37:08'),
+(29, 15, 'Appointment Submitted (Pending)', 'Your consultation with Jansen Quinones is Pending doctor confirmation. Reference: HSP-2610-4109.', 'reminder', 0, '2026-10-14 23:42:11'),
+(30, 15, 'Appointment Confirmed', 'Dr. Jansen Quinones confirmed your consultation [HSP-2610-4109]. We look forward to seeing you!', 'confirmed', 0, '2026-10-14 23:53:43');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `users`
+--
+
+CREATE TABLE `users` (
+  `id` int(11) NOT NULL,
+  `full_name` varchar(100) NOT NULL,
+  `identifier` varchar(100) NOT NULL,
+  `phone_number` varchar(30) NOT NULL,
+  `password_hash` varchar(255) NOT NULL,
+  `role` enum('patient','doctor','admin') DEFAULT 'patient',
+  `department` varchar(100) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `unavailable_count` int(11) DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `users`
+--
+
+INSERT INTO `users` (`id`, `full_name`, `identifier`, `phone_number`, `password_hash`, `role`, `department`, `created_at`, `unavailable_count`) VALUES
+(1, 'Master Administrator', 'admin@hosplinic', '+1 800-555-0199', '$2y$10$i3EKP7XdB9jJ40yA3ENCOeFzU.azBeyLd6PabOiWHDHsBH/HS.S4W', 'admin', NULL, '2026-10-14 03:46:17', 0),
+(14, 'Ralph Cervera', 'raincee', '0912345678', '$2y$10$l4u8fC9ex17bC27j43GQfegbE31aJ3wGGk39bei3AIOclUX.AYnbe', 'doctor', 'General Medicine', '2026-10-14 15:29:23', 1),
+(15, '1', '1', '1', '$2y$10$pZd2bkkw219Cau252n/G7uE9N56oYt91WPdZnsRFZD77MhQhk0Giu', 'patient', NULL, '2026-10-14 15:29:38', 0),
+(16, 'admin', 'admin', '000000', '$2y$10$kpks7tCUtAIdz/0S3WfNgOwVG/G/jIEVcKvBmrpl2.oxxbg8sOOUu', 'admin', NULL, '2026-10-14 21:39:07', 0),
+(17, 'Jansen Quinones', 'sen', '0000000', '$2y$10$u4H0lxEC5kbjfqcgWw8SquL4Wps2RBMv1sT3YBmCkN29ZKaDWlTLK', 'doctor', 'General Medicine', '2026-10-14 21:50:38', 0),
+(18, 'Ralph Cervera', 'cerveraralph6@gmail.com', '', '$2y$10$o1IhVONsORGE.kE/d8AWWuplxRMaeQmtUWTl4twWZdZ5F/eshogYi', 'patient', NULL, '2026-10-14 22:14:06', 0);
+
+--
+-- Indexes for dumped tables
+--
+
+--
+-- Indexes for table `appointments`
+--
+ALTER TABLE `appointments`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `booking_code` (`booking_code`),
+  ADD KEY `user_id` (`user_id`),
+  ADD KEY `fk_doctor` (`doctor_id`);
+
+--
+-- Indexes for table `billings`
+--
+ALTER TABLE `billings`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `invoice_number` (`invoice_number`),
+  ADD KEY `user_id` (`user_id`),
+  ADD KEY `appointment_id` (`appointment_id`);
+
+--
+-- Indexes for table `doctor_unavailability_logs`
+--
+ALTER TABLE `doctor_unavailability_logs`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `doctor_id` (`doctor_id`),
+  ADD KEY `appointment_id` (`appointment_id`);
+
+--
+-- Indexes for table `medical_records`
+--
+ALTER TABLE `medical_records`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `patient_id` (`patient_id`),
+  ADD KEY `doctor_id` (`doctor_id`);
+
+--
+-- Indexes for table `notifications`
+--
+ALTER TABLE `notifications`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `user_id` (`user_id`);
+
+--
+-- Indexes for table `users`
+--
+ALTER TABLE `users`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `identifier` (`identifier`);
+
+--
+-- AUTO_INCREMENT for dumped tables
+--
+
+--
+-- AUTO_INCREMENT for table `appointments`
+--
+ALTER TABLE `appointments`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=14;
+
+--
+-- AUTO_INCREMENT for table `billings`
+--
+ALTER TABLE `billings`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=13;
+
+--
+-- AUTO_INCREMENT for table `doctor_unavailability_logs`
+--
+ALTER TABLE `doctor_unavailability_logs`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+
+--
+-- AUTO_INCREMENT for table `medical_records`
+--
+ALTER TABLE `medical_records`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+
+--
+-- AUTO_INCREMENT for table `notifications`
+--
+ALTER TABLE `notifications`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=31;
+
+--
+-- AUTO_INCREMENT for table `users`
+--
+ALTER TABLE `users`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=19;
+
+--
+-- Constraints for dumped tables
+--
+
+--
+-- Constraints for table `appointments`
+--
+ALTER TABLE `appointments`
+  ADD CONSTRAINT `appointments_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `fk_doctor` FOREIGN KEY (`doctor_id`) REFERENCES `users` (`id`) ON DELETE SET NULL;
+
+--
+-- Constraints for table `billings`
+--
+ALTER TABLE `billings`
+  ADD CONSTRAINT `billings_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `billings_ibfk_2` FOREIGN KEY (`appointment_id`) REFERENCES `appointments` (`id`) ON DELETE SET NULL;
+
+--
+-- Constraints for table `doctor_unavailability_logs`
+--
+ALTER TABLE `doctor_unavailability_logs`
+  ADD CONSTRAINT `doctor_unavailability_logs_ibfk_1` FOREIGN KEY (`doctor_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `doctor_unavailability_logs_ibfk_2` FOREIGN KEY (`appointment_id`) REFERENCES `appointments` (`id`) ON DELETE CASCADE;
+
+--
+-- Constraints for table `medical_records`
+--
+ALTER TABLE `medical_records`
+  ADD CONSTRAINT `medical_records_ibfk_1` FOREIGN KEY (`patient_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `medical_records_ibfk_2` FOREIGN KEY (`doctor_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+
+--
+-- Constraints for table `notifications`
+--
+ALTER TABLE `notifications`
+  ADD CONSTRAINT `notifications_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+COMMIT;
+
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
