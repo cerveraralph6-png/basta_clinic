@@ -65,6 +65,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
+// Handle Admin Confirming On-Site or Submitted Payment
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'verify_payment') {
+    $bill_id = intval($_POST['bill_id'] ?? 0);
+    $pdo->prepare("UPDATE billings SET payment_status = 'Paid' WHERE id = :id")->execute([':id' => $bill_id]);
+    $staff_msg = "Payment successfully verified and marked as Paid!";
+}
+
+// Fetch pending payment verifications
+$pendingBillsStmt = $pdo->query("
+    SELECT b.*, u.full_name AS patient_name 
+    FROM billings b
+    JOIN users u ON b.user_id = u.id
+    WHERE b.payment_status LIKE '%Pending%'
+    ORDER BY b.created_at ASC
+");
+$pendingPayments = $pendingBillsStmt->fetchAll(PDO::FETCH_ASSOC);
+
 
 
 
@@ -364,6 +381,19 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
                 <span class="card__link">View Doctor Audits &rarr;</span>
             </div>
 
+            <!-- Card: Payment Verification Queue -->
+            <div class="card" id="openPaymentVerifyModal" role="button" tabindex="0">
+                <div>
+                    <div class="card__icon" style="background: #e0f2fe; color: #0284c7;">💰</div>
+                    <h3 class="card__title">Payment Verifications</h3>
+                    <p class="card__desc">Review on-site payments and uploaded receipt proofs submitted by patients.</p>
+                    <div class="pill-group">
+                        <span class="pill pill--warn"><?= count($pendingPayments) ?> Pending Verification(s)</span>
+                    </div>
+                </div>
+                <span class="card__link">Verify Payments &rarr;</span>
+            </div>
+
         </div>
     </main>
 
@@ -598,6 +628,56 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
             </div>
         </div>
     </div>
+
+    <!-- MODAL: PAYMENT VERIFICATION -->
+    <div class="modal-overlay" id="paymentVerifyModal" aria-hidden="true">
+        <div class="modal modal--wide">
+            <div class="modal__header">
+                <h3>Pending Payment Verifications</h3>
+                <button class="modal__close" data-close="paymentVerifyModal">&times;</button>
+            </div>
+            <div class="modal__body">
+                <div class="list-container">
+                    <?php if (count($pendingPayments) > 0): ?>
+                        <?php foreach ($pendingPayments as $pay): ?>
+                            <div class="list-item" style="display: flex; justify-content: space-between; align-items: center; padding: 1rem; border-bottom: 1px solid var(--border-subtle); flex-wrap: wrap; gap: 1rem;">
+                                <div>
+                                    <strong><?= htmlspecialchars($pay['patient_name']) ?></strong> &bull; <?= htmlspecialchars($pay['invoice_number']) ?>
+                                    <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0.2rem 0;">
+                                        Method: <strong><?= htmlspecialchars($pay['payment_method'] ?? 'Online') ?></strong> | Amount: <strong>₱<?= number_format($pay['total_amount'], 2) ?></strong>
+                                    </p>
+                                    <?php if (!empty($pay['receipt_path'])): ?>
+                                        <a href="../<?= htmlspecialchars($pay['receipt_path']) ?>" target="_blank" class="btn btn--outline" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-top: 0.3rem;">
+                                            &#128206; View Attached Receipt (<?= htmlspecialchars($pay['receipt_name']) ?>)
+                                        </a>
+                                    <?php else: ?>
+                                        <span style="font-size: 0.75rem; color: #b45309;">(On-site cash/check payment pending at clinic desk)</span>
+                                    <?php endif; ?>
+                                </div>
+                                <form action="admin.php" method="POST" style="margin: 0;">
+                                    <input type="hidden" name="action" value="verify_payment">
+                                    <input type="hidden" name="bill_id" value="<?= $pay['id'] ?>">
+                                    <button type="submit" class="btn btn--primary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">
+                                        &#10003; Confirm Payment
+                                    </button>
+                                </form>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <p style="text-align: center; color: var(--text-muted); padding: 2rem 0;">No pending payments to verify.</p>
+                    <?php endif; ?>
+                </div>
+                <div class="modal-actions" style="margin-top: 1.5rem;">
+                    <button class="btn btn--outline" data-close="paymentVerifyModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // Trigger script for admin payment verify modal
+    document.getElementById('openPaymentVerifyModal').addEventListener('click', () => openModal('paymentVerifyModal'));
+</script>
 
     <footer class="footer">
         <p>&copy; <?= date('Y') ?> Hosplinic Management System &bull; Admin Portal</p>

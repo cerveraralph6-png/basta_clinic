@@ -2,7 +2,7 @@
 session_start();
 require_once '../db.php';
 
-
+// Authentication Guard
 if (!isset($_SESSION['user_id'])) {
     header("Location: ../index.php");
     exit;
@@ -16,23 +16,56 @@ $booking_msg = '';
 $booking_error = '';
 $open_modal = '';
 
-
+// Helper: Calculate earliest date 3 working days ahead (Skipping Sat & Sun)
 function getMinBookingDate() {
     $date = new DateTime();
     $added = 0;
     while ($added < 3) {
         $date->modify('+1 day');
-        $dayOfWeek = (int)$date->format('N'); 
-        if ($dayOfWeek <= 5) { 
+        $dayOfWeek = (int)$date->format('N'); // 1 (Mon) to 7 (Sun)
+        if ($dayOfWeek <= 5) { // Only count Monday - Friday
             $added++;
         }
     }
     return $date;
 }
 
+// ==========================================
+// 0. AJAX API: CHECK HOURLY SLOT CAPACITY
+// ==========================================
+if (isset($_GET['check_slot']) && isset($_GET['date']) && isset($_GET['time'])) {
+    header('Content-Type: application/json');
+    $checkDate = trim($_GET['date']);
+    $checkTime = trim($_GET['time']); // e.g. "08:00:00"
+    $targetHour = substr($checkTime, 0, 2); // "08"
 
+    $docCountStmt = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'doctor' AND department IS NOT NULL");
+    $totalActiveDoctors = max(1, intval($docCountStmt->fetchColumn()));
+    $maxCapacity = $totalActiveDoctors * 3;
 
+    $slotQuery = $pdo->prepare("
+        SELECT COUNT(*) FROM appointments 
+        WHERE DATE(appointment_datetime) = :bdate 
+          AND HOUR(appointment_datetime) = :bhour 
+          AND status != 'Cancelled'
+    ");
+    $slotQuery->execute([
+        ':bdate' => $checkDate,
+        ':bhour' => $targetHour
+    ]);
+    $bookedCount = intval($slotQuery->fetchColumn());
 
+    echo json_encode([
+        'is_full' => ($bookedCount >= $maxCapacity),
+        'booked' => $bookedCount,
+        'max' => $maxCapacity
+    ]);
+    exit;
+}
+
+// ==========================================
+// 1. SAVE NEW APPOINTMENT (WITH CAPACITY CHECK)
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'book_appointment') {
     $department = trim($_POST['department'] ?? '');
     $doctor_id  = intval($_POST['doctor_id'] ?? 0);
@@ -42,8 +75,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $reason     = trim($_POST['reason'] ?? '');
 
     $dateTime   = (!empty($bookDate) && !empty($bookTime)) ? ($bookDate . ' ' . $bookTime) : '';
+    $targetHour = !empty($bookTime) ? substr($bookTime, 0, 2) : '';
 
-    
     $attachmentPath = null;
     $attachmentName = null;
 
@@ -67,7 +100,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
     }
 
-    
+    $docCountStmt = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'doctor' AND department IS NOT NULL");
+    $totalActiveDoctors = max(1, intval($docCountStmt->fetchColumn()));
+    $maxCapacity = $totalActiveDoctors * 3;
+
+    $slotQuery = $pdo->prepare("
+        SELECT COUNT(*) FROM appointments 
+        WHERE DATE(appointment_datetime) = :bdate 
+          AND HOUR(appointment_datetime) = :bhour 
+          AND status != 'Cancelled'
+    ");
+    $slotQuery->execute([':bdate' => $bookDate, ':bhour' => $targetHour]);
+    $bookedCount = intval($slotQuery->fetchColumn());
+
     $selectedTimestamp = strtotime($dateTime);
     $minAllowedDate = getMinBookingDate();
     $minDateStr = $minAllowedDate->format('Y-m-d');
@@ -79,6 +124,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     } elseif ($bookDate < $minDateStr) {
         $booking_error = "Booking policy violation: Same-day or rush bookings are disabled. Earliest allowed date is " . $minAllowedDate->format('M d, Y') . ".";
         $open_modal = 'bookModal';
+    } elseif ($bookedCount >= $maxCapacity) {
+        $booking_error = "This hour slot is fully booked (Max capacity reached). Please select another time or date.";
+        $open_modal = 'bookModal';
     } elseif ($dayOfWeek === 7) {
         $booking_error = "The clinic is closed on Sundays. Please select Monday through Saturday.";
         $open_modal = 'bookModal';
@@ -89,7 +137,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $booking_error = "Pediatrics specialists are available Monday through Friday only.";
         $open_modal = 'bookModal';
     } else {
-        
         if ($doctor_id <= 0 || empty($doctor_name)) {
             $findDoc = $pdo->prepare("
                 SELECT id, full_name 
@@ -132,7 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             ]);
             $appointment_id = $pdo->lastInsertId();
 
-            
+            // Set up Lab Recommendation
             $labName = null;
             $labFee = 0.00;
             $labStatus = 'none';
@@ -151,7 +198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $labStatus = 'pending';
             }
 
-            
+            // Create Base Billing Invoice
             $invoiceNum = 'INV-' . date('Ymd') . '-' . rand(1000, 9999);
             $baseFee = 500.00;
 
@@ -190,9 +237,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-
-
-
+// ==========================================
+// 2. CANCEL APPOINTMENT
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'cancel_appointment') {
     $apt_id = intval($_POST['appointment_id'] ?? 0);
     $cancel_reason = trim($_POST['cancellation_reason'] ?? '');
@@ -282,9 +329,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-
-
-
+// ==========================================
+// 3. RESPOND TO LAB & SUBMIT PAYMENT WITH PROOF
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'respond_lab') {
     $bill_id = intval($_POST['bill_id'] ?? 0);
     $decision = $_POST['decision'] ?? '';
@@ -309,17 +356,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'pay_invoice') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'submit_payment') {
     $bill_id = intval($_POST['bill_id'] ?? 0);
-    $pStmt = $pdo->prepare("UPDATE billings SET payment_status = 'Paid' WHERE id = :id AND user_id = :user_id");
-    $pStmt->execute([':id' => $bill_id, ':user_id' => $user_id]);
-    $booking_msg = "Payment confirmed! Invoice marked as Paid.";
-    $open_modal = 'billingModal';
+    $method = trim($_POST['payment_method'] ?? '');
+
+    $receiptPath = null;
+    $receiptName = null;
+
+    if (isset($_FILES['payment_receipt']) && $_FILES['payment_receipt']['error'] === UPLOAD_ERR_OK) {
+        $file = $_FILES['payment_receipt'];
+        $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        if (in_array($ext, ['jpg', 'jpeg', 'png', 'pdf'])) {
+            $uploadDir = '../uploads/';
+            if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
+            $newFileName = 'receipt_' . uniqid() . '.' . $ext;
+            if (move_uploaded_file($file['tmp_name'], $uploadDir . $newFileName)) {
+                $receiptPath = 'uploads/' . $newFileName;
+                $receiptName = $file['name'];
+            }
+        }
+    }
+
+    if (in_array($method, ['GCash', 'Maya', 'Card']) && empty($receiptPath)) {
+        $booking_error = "Proof of payment receipt is required for online payment methods.";
+        $open_modal = 'billingModal';
+    } else {
+        $payStatus = ($method === 'Onsite Payment') ? 'Payment Pending (On-site verification)' : 'Paid';
+
+        $stmt = $pdo->prepare("
+            UPDATE billings 
+            SET payment_method = :method, receipt_path = :rpath, receipt_name = :rname, payment_status = :pstatus 
+            WHERE id = :id AND user_id = :user_id
+        ");
+        $stmt->execute([
+            ':method'  => $method,
+            ':rpath'   => $receiptPath,
+            ':rname'   => $receiptName,
+            ':pstatus' => $payStatus,
+            ':id'      => $bill_id,
+            ':user_id' => $user_id
+        ]);
+
+        $booking_msg = ($method === 'Onsite Payment') 
+            ? "On-site payment selected. Status is <strong>Payment Pending</strong> until admin verification." 
+            : "Payment submitted successfully with receipt proof!";
+        $open_modal = 'billingModal';
+    }
 }
 
-
-
-
+// ==========================================
+// 4. FETCH DATA
+// ==========================================
 $billQuery = $pdo->prepare("SELECT * FROM billings WHERE user_id = :user_id ORDER BY created_at DESC");
 $billQuery->execute([':user_id' => $user_id]);
 $billings = $billQuery->fetchAll(PDO::FETCH_ASSOC);
@@ -362,7 +449,6 @@ foreach ($appointments as $apt) {
         break;
     }
 }
-
 
 $minDateObj = getMinBookingDate();
 $minDateOnly = $minDateObj->format('Y-m-d');
@@ -695,10 +781,10 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                             </svg>
                         </div>
                         <h3 class="card__title">Book Appointment</h3>
-                        <p class="card__desc">Choose your department. Must be booked at least 3 business days in advance.</p>
+                        <p class="card__desc">Choose your department. Subject to max hourly capacity limits (Max 3/doc/hour).</p>
                         
                         <div class="pill-group">
-                            <span class="pill pill--pending">3 Working Days Advance Policy</span>
+                            <span class="pill pill--pending">Capacity Control Active</span>
                         </div>
                     </div>
                     <span class="card__link">+ Request Visit Now &rarr;</span>
@@ -713,7 +799,7 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                             </svg>
                         </div>
                         <h3 class="card__title">Billing & Statements</h3>
-                        <p class="card__desc">Review consultation invoices, cancellation fees, and settle outstanding balances online.</p>
+                        <p class="card__desc">Review consultation invoices, upload payment proofs, and settle balances.</p>
                         
                         <div class="pill-group">
                             <?php if ($totalOutstanding > 0): ?>
@@ -820,9 +906,7 @@ $minDateOnly = $minDateObj->format('Y-m-d');
         </div>
     </div>
 
-    <!-- ====================================================================
-         MODAL: BOOK APPOINTMENT (NATIVELY DISABLED DATES & REAL TIME SLOTS)
-         ==================================================================== -->
+    <!-- MODAL: BOOK APPOINTMENT -->
     <div class="modal-overlay" id="bookModal" aria-hidden="true">
         <div class="modal">
             <div class="modal__header">
@@ -834,9 +918,8 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                     <input type="hidden" name="action" value="book_appointment">
                     <input type="hidden" name="doctor_id" id="autoDoctorId" value="">
 
-                    <!-- Advance Booking Policy Banner -->
                     <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 0.75rem 1rem; border-radius: var(--radius-md); font-size: 0.8rem; color: #1e40af; margin-bottom: 0.5rem;">
-                        &#128197; <strong>Scheduling Policy:</strong> Previous dates, same-day, and the next 3 business days are <strong>strictly disabled</strong> on the calendar below.
+                        &#128197; <strong>Capacity Policy:</strong> Slots are limited to 3-4 patients per doctor per hour. Fully booked hours will be disabled.
                     </div>
 
                     <div class="form-group">
@@ -864,7 +947,6 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                         <span class="auto-hint" id="autoHintText">The attending specialist will be assigned automatically based on clinic availability.</span>
                     </div>
 
-                    <!-- SEPARATED DATE & REAL TIME SLOTS (NATIVELY DISABLED PAST/3-DAY WINDOW) -->
                     <div class="form-row">
                         <div class="form-group">
                             <label for="bookDate">Consultation Date</label>
@@ -882,18 +964,10 @@ $minDateOnly = $minDateObj->format('Y-m-d');
 
                         <div class="form-group">
                             <label for="bookTime">Time Slot</label>
-                            <select name="appointment_time" id="bookTime" required>
-                                <option value="">Select Time...</option>
-                                <option value="08:00:00">08:00 AM</option>
-                                <option value="09:00:00">09:00 AM</option>
-                                <option value="10:00:00">10:00 AM</option>
-                                <option value="11:00:00">11:00 AM</option>
-                                <option value="13:00:00">01:00 PM</option>
-                                <option value="14:00:00">02:00 PM</option>
-                                <option value="15:00:00">03:00 PM</option>
-                                <option value="16:00:00">04:00 PM</option>
+                            <select name="appointment_time" id="bookTime" required disabled>
+                                <option value="">-- Select Date First --</option>
                             </select>
-                            <span class="auto-hint">Regular clinic hours</span>
+                            <span class="auto-hint" id="slotCapacityHint">Choose a date to check hourly availability.</span>
                         </div>
                     </div>
 
@@ -923,8 +997,52 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                     </div>
 
                     <div class="modal-actions" style="margin-top: 1rem;">
-                        <button type="submit" class="btn btn--primary" style="flex:1;">Confirm & Book (₱500)</button>
+                        <button type="submit" class="btn btn--primary" style="flex:1;">Confirm & Book</button>
                         <button type="button" class="btn btn--outline" data-close="bookModal">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================
+         NEW MODAL: PAYMENT METHOD & RECEIPT UPLOAD
+         ========================================== -->
+    <div class="modal-overlay" id="paymentModal" aria-hidden="true">
+        <div class="modal">
+            <div class="modal__header">
+                <h3>Select Payment Method & Upload Proof</h3>
+                <button class="modal__close" type="button" id="closePaymentModal">&times;</button>
+            </div>
+            <div class="modal__body">
+                <form action="patient.php" method="POST" enctype="multipart/form-data" class="patient-form">
+                    <input type="hidden" name="action" value="submit_payment">
+                    <input type="hidden" name="bill_id" id="payment_bill_id" value="">
+
+                    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 0.75rem; border-radius: var(--radius-md); font-size: 0.825rem; color: #166534; margin-bottom: 1rem;">
+                        &#128197; <strong>Flexible Payment Policy:</strong> You can pay after your consultation. If you choose <strong>On-site Payment</strong>, your status will show as <em>Payment Pending (On-site verification)</em> until our staff verifies it at the clinic.
+                    </div>
+
+                    <div class="form-group">
+                        <label for="payment_method">Payment Method</label>
+                        <select name="payment_method" id="payment_method" required onchange="toggleReceiptField(this.value)">
+                            <option value="">-- Choose Payment Method --</option>
+                            <option value="GCash">GCash</option>
+                            <option value="Maya">Maya</option>
+                            <option value="Card">Credit / Debit Card</option>
+                            <option value="Onsite Payment">Onsite Payment (Pay at Clinic)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="receiptUploadGroup">
+                        <label for="payment_receipt">Upload Proof of Receipt <span id="receiptRequiredStar" style="color:#dc2626;">*</span></label>
+                        <input type="file" name="payment_receipt" id="payment_receipt" accept=".jpg,.jpeg,.png,.pdf">
+                        <span class="auto-hint">Attach screenshot or photo of your transfer confirmation / transaction slip.</span>
+                    </div>
+
+                    <div class="modal-actions" style="margin-top: 1.5rem;">
+                        <button type="submit" class="btn btn--primary" style="flex:1;">Submit Payment Proof</button>
+                        <button type="button" class="btn btn--outline" id="cancelPaymentModal">Cancel</button>
                     </div>
                 </form>
             </div>
@@ -939,6 +1057,10 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                 <button class="modal__close" data-close="billingModal">&times;</button>
             </div>
             <div class="modal__body">
+                <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 0.85rem 1rem; border-radius: var(--radius-md); font-size: 0.85rem; color: #166534; margin-bottom: 1.25rem;">
+                    &#128197; <strong>Flexible Payment Policy:</strong> Payments can be made after your consultation date or hour. Pre-payment is completely optional.
+                </div>
+
                 <div class="billing-summary-box">
                     <div>
                         <small>Total Outstanding Balance</small>
@@ -967,6 +1089,9 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                                         <span class="pill <?= $bill['payment_status'] === 'Paid' ? 'pill--ok' : 'pill--warn' ?>">
                                             <?= htmlspecialchars($bill['payment_status']) ?>
                                         </span>
+                                        <?php if (!empty($bill['payment_method'])): ?>
+                                            <small style="display:block; color:var(--text-muted); font-size:0.75rem;">Via <?= htmlspecialchars($bill['payment_method']) ?></small>
+                                        <?php endif; ?>
                                     </div>
                                 </div>
                             </div>
@@ -999,13 +1124,13 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                             <?php endif; ?>
 
                             <?php if ($bill['payment_status'] === 'Unpaid'): ?>
-                                <form action="patient.php" method="POST" style="margin-top: 0.25rem;">
-                                    <input type="hidden" name="action" value="pay_invoice">
-                                    <input type="hidden" name="bill_id" value="<?= $bill['id'] ?>">
-                                    <button type="submit" class="btn btn--primary" style="width: 100%; padding: 0.5rem; font-size: 0.85rem;">
+                                <div style="margin-top: 0.25rem;">
+                                    <button type="button" onclick="openPaymentModal(<?= $bill['id'] ?>)" class="btn btn--primary" style="width: 100%; padding: 0.5rem; font-size: 0.85rem;">
                                         Pay Balance (₱<?= number_format($bill['total_amount'], 2) ?>)
                                     </button>
-                                </form>
+                                </div>
+                            <?php elseif (strpos($bill['payment_status'], 'Pending') !== false): ?>
+                                <span class="pill pill--pending" style="display:block; text-align:center; padding:0.4rem;">Receipt submitted. Awaiting Admin verification.</span>
                             <?php endif; ?>
                         </div>
                     <?php endforeach; ?>
@@ -1072,7 +1197,7 @@ $minDateOnly = $minDateObj->format('Y-m-d');
         <p>&copy; <?= date('Y') ?> Hosplinic Management System &bull; Patient Care Portal</p>
     </footer>
 
-    <!-- Scripts -->
+    <!-- Interactive Scripts -->
     <script>
         const registeredDoctors = <?= json_encode($dbDoctors) ?>;
         const patientAppointments = <?= json_encode($appointments) ?>;
@@ -1085,9 +1210,6 @@ $minDateOnly = $minDateObj->format('Y-m-d');
             'General Medicine': { days: [1, 2, 3, 4, 5, 6], label: 'Mon – Sat (08:00 AM – 05:00 PM)' }
         };
 
-        
-        
-        
         const notifBtn = document.getElementById('notifBtn');
         const notifDropdown = document.getElementById('notifDropdown');
 
@@ -1109,9 +1231,9 @@ $minDateOnly = $minDateObj->format('Y-m-d');
         const autoDoctorId = document.getElementById('autoDoctorId');
         const autoHintText = document.getElementById('autoHintText');
         const bookDateInput = document.getElementById('bookDate');
-        const dateHint = document.getElementById('dateHint');
+        const bookTimeSelect = document.getElementById('bookTime');
+        const slotCapacityHint = document.getElementById('slotCapacityHint');
 
-        
         if (deptSelect) {
             deptSelect.addEventListener('change', function() {
                 const selectedDept = this.value;
@@ -1139,26 +1261,22 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                     autoHintText.innerText = `An on-call specialist from ${selectedDept} will review your request.`;
                 }
 
-                
                 if (bookDateInput.value) {
                     validatePickedDate(bookDateInput.value, selectedDept);
                 }
             });
         }
 
-        
         function validatePickedDate(dateVal, selectedDept) {
             const picked = new Date(dateVal + 'T00:00:00');
             const dayOfWeek = picked.getDay(); 
 
-            
             if (dayOfWeek === 0) {
                 alert("The outpatient clinic is closed on Sundays. Please select a day from Monday to Saturday.");
                 bookDateInput.value = "";
                 return;
             }
 
-            
             if (selectedDept && departmentRules[selectedDept]) {
                 const rule = departmentRules[selectedDept];
                 const isoDay = dayOfWeek === 0 ? 7 : dayOfWeek;
@@ -1171,15 +1289,96 @@ $minDateOnly = $minDateObj->format('Y-m-d');
             }
         }
 
+        // Standard clinic consultation time slots
+        const availableTimeSlots = [
+            { val: "08:00:00", label: "08:00 AM" },
+            { val: "09:00:00", label: "09:00 AM" },
+            { val: "10:00:00", label: "10:00 AM" },
+            { val: "11:00:00", label: "11:00 AM" },
+            { val: "13:00:00", label: "01:00 PM" },
+            { val: "14:00:00", label: "02:00 PM" },
+            { val: "15:00:00", label: "03:00 PM" },
+            { val: "16:00:00", label: "04:00 PM" }
+        ];
+
         if (bookDateInput) {
-            bookDateInput.addEventListener('change', function() {
-                if (this.value) {
-                    validatePickedDate(this.value, deptSelect.value);
+            bookDateInput.addEventListener('change', async function() {
+                const dateVal = this.value;
+                if (!dateVal) return;
+
+                validatePickedDate(dateVal, deptSelect.value);
+
+                bookTimeSelect.disabled = false;
+                slotCapacityHint.innerText = "Checking slot capacity...";
+
+                // Clear dropdown and rebuild options
+                bookTimeSelect.innerHTML = '<option value="">Select Time Slot...</option>';
+
+                for (let slot of availableTimeSlots) {
+                    const timeVal = slot.val;
+                    const timeLabel = slot.label;
+                    let isFull = false;
+                    let bookedCount = 0;
+                    let maxCap = 3;
+
+                    try {
+                        const res = await fetch(`patient.php?check_slot=1&date=${dateVal}&time=${timeVal}`);
+                        const data = await res.json();
+                        isFull = data.is_full;
+                        bookedCount = data.booked;
+                        maxCap = data.max;
+                    } catch (e) {
+                        console.error(e);
+                    }
+
+                    const opt = document.createElement('option');
+                    opt.value = timeVal;
+
+                    if (isFull) {
+                        opt.disabled = true;
+                        opt.text = `${timeLabel} — FULLY BOOKED (${bookedCount}/${maxCap})`;
+                        opt.style.color = '#ef4444';
+                    } else {
+                        opt.disabled = false;
+                        opt.text = `${timeLabel} (${bookedCount}/${maxCap} booked)`;
+                        opt.style.color = '#15803d';
+                    }
+                    bookTimeSelect.appendChild(opt);
                 }
+                slotCapacityHint.innerText = "Time slots are limited";
             });
         }
 
-        
+        function formatTimeLabel(timeStr) {
+            const [h, m] = timeStr.split(':');
+            let hour = parseInt(h);
+            const ampm = hour >= 12 ? 'PM' : 'AM';
+            hour = hour % 12 || 12;
+            return `${hour}:${m} ${ampm}`;
+        }
+
+        // Payment Modal & Receipt Toggle
+        function openPaymentModal(billId) {
+            document.getElementById('payment_bill_id').value = billId;
+            openModal('paymentModal');
+        }
+
+        function toggleReceiptField(method) {
+            const uploadGroup = document.getElementById('receiptUploadGroup');
+            const receiptInput = document.getElementById('payment_receipt');
+            if (method === 'Onsite Payment') {
+                uploadGroup.style.display = 'none';
+                receiptInput.required = false;
+            } else {
+                uploadGroup.style.display = 'flex';
+                receiptInput.required = true;
+            }
+        }
+
+        document.getElementById('closePaymentModal').addEventListener('click', () => closeModal('paymentModal'));
+        document.getElementById('cancelPaymentModal').addEventListener('click', () => closeModal('paymentModal'));
+
+        // Live Dashboard Calendar
         let calendarDate = new Date();
         let selectedDayDate = new Date();
         const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
