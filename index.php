@@ -2,13 +2,18 @@
 session_start();
 require_once 'db.php';
 
+// ====================================================================
+// CONFIGURE YOUR GOOGLE CLIENT ID HERE
+// ====================================================================
 $google_client_id = '400820330228-fobmbu7882pm3dd393vv0dpe43735rpm.apps.googleusercontent.com';
 
 $auth_error = '';
 $auth_success = '';
 $open_modal_on_load = ''; 
 
-
+// ==========================================
+// 1. HANDLE CONFIRMED GOOGLE REGISTRATION
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'confirm_google_register') {
     if (isset($_SESSION['pending_google_user'])) {
         $name  = $_SESSION['pending_google_user']['name'];
@@ -40,9 +45,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-
-
-
+// ==========================================
+// 2. HANDLE GOOGLE SIGN-IN / SIGN-UP (JWT)
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'google_login') {
     $jwt = $_POST['credential'] ?? '';
     $auth_source = $_POST['auth_source'] ?? 'login';
@@ -113,9 +118,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-
-
-
+// ==========================================
+// 3. HANDLE MANUAL REGISTRATION
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'register') {
     $fullName        = trim($_POST['fullName'] ?? '');
     $identifier      = trim($_POST['identifier'] ?? '');
@@ -166,9 +171,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-
-
-
+// ==========================================
+// 4. HANDLE MANUAL LOGIN
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'login') {
     $loginIdentifier = trim($_POST['loginIdentifier'] ?? '');
     $loginPassword   = $_POST['loginPassword'] ?? '';
@@ -203,9 +208,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-
-
-
+// ==========================================
+// 5. FETCH DOCTOR AVAILABILITY SCHEDULES
+// ==========================================
 $docScheduleStmt = $pdo->prepare("
     SELECT id, full_name, department, phone_number 
     FROM users 
@@ -214,7 +219,6 @@ $docScheduleStmt = $pdo->prepare("
 ");
 $docScheduleStmt->execute();
 $publicDoctors = $docScheduleStmt->fetchAll(PDO::FETCH_ASSOC);
-
 
 function getDoctorShift($dept) {
     switch ($dept) {
@@ -237,12 +241,16 @@ function getDoctorShift($dept) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hosplinic Management System</title>
-    <link rel="preconnect" href="https:
-    <link rel="preconnect" href="https:
-    <link href="https:
+    
+    <!-- Properly Formatted Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
     <link rel="stylesheet" href="styles/index.css">
     
-    <script src="https:
+    <!-- Google Identity Services Library -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
 
     <style>
         .modal-switch-text {
@@ -276,7 +284,6 @@ function getDoctorShift($dept) {
             margin-bottom: 0.5rem;
         }
 
-       
         .clinic-hours-banner {
             background: #f8fafc;
             border: 1px solid var(--border-subtle);
@@ -390,7 +397,7 @@ function getDoctorShift($dept) {
             <div class="card" id="openRegisterModal" role="button" tabindex="0">
                 <div>
                     <div class="card__icon card__icon--blue">
-                        <svg xmlns="http:
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
                         </svg>
                     </div>
@@ -400,11 +407,11 @@ function getDoctorShift($dept) {
                 <span class="card__link">Register Now &rarr;</span>
             </div>
 
-            <!-- Card 2: RENAMED TO "Doctors appointment availability schedule and clinic hours" -->
+            <!-- Card 2: Schedule -->
             <div class="card" id="openScheduleModal" role="button" tabindex="0">
                 <div>
                     <div class="card__icon card__icon--teal">
-                        <svg xmlns="http:
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                     </div>
@@ -427,9 +434,7 @@ function getDoctorShift($dept) {
         <input type="hidden" name="credential" id="googleCredentialInput">
     </form>
 
-    <!-- ==========================================
-         LOGIN MODAL
-         ========================================== -->
+    <!-- LOGIN MODAL -->
     <div class="modal-overlay" id="loginModal" aria-hidden="true">
         <div class="modal">
             <div class="modal__header">
@@ -573,9 +578,7 @@ function getDoctorShift($dept) {
         </div>
     </div>
 
-    <!-- ====================================================================
-         UPDATED MODAL: DOCTOR AVAILABILITY SCHEDULE & CLINIC OPERATING HOURS
-         ==================================================================== -->
+    <!-- MODAL: SCHEDULE & HOURS -->
     <div class="modal-overlay" id="scheduleModal" aria-hidden="true">
         <div class="modal modal--wide">
             <div class="modal__header">
@@ -584,7 +587,6 @@ function getDoctorShift($dept) {
             </div>
             <div class="modal__body">
 
-                <!-- 1. General Clinic Operating Hours -->
                 <div class="clinic-hours-banner">
                     <div class="clinic-hours-item">
                         <h5>Outpatient Clinic</h5>
@@ -600,7 +602,6 @@ function getDoctorShift($dept) {
                     </div>
                 </div>
 
-                <!-- 2. Registered Doctors Availability Directory -->
                 <h4 style="margin-bottom: 0.75rem; font-size: 0.95rem; color: var(--text-dark);">
                     Specialist Consultation Availability (By Department)
                 </h4>
@@ -634,7 +635,6 @@ function getDoctorShift($dept) {
                     <?php endif; ?>
                 </div>
 
-                <!-- Call to action button -->
                 <div style="margin-top: 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
                     <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0;">
                         Ready to consult? Register or log in to secure your slot.

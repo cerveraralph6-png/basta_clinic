@@ -265,10 +265,11 @@ foreach ($doctorQueue as $q) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hosplinic | Physician Portal</title>
-    <link rel="preconnect" href="https:
-    <link rel="preconnect" href="https:
-    <link href="https:
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../styles/doctor.css">
+
 
     <style>
         .alert { padding: 0.75rem 1rem; border-radius: var(--radius-md, 8px); font-size: 0.875rem; margin-bottom: 1.5rem; }
