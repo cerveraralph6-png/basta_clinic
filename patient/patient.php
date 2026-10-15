@@ -2,7 +2,7 @@
 session_start();
 require_once '../db.php';
 
-// Authentication Guard
+
 if (!isset($_SESSION['user_id'])) {
     header("Location: ../index.php");
     exit;
@@ -16,44 +16,123 @@ $booking_msg = '';
 $booking_error = '';
 $open_modal = '';
 
-// ==========================================
-// 1. SAVE NEW APPOINTMENT & CREATE ₱500 BILL
-// ==========================================
+
+function getMinBookingDate() {
+    $date = new DateTime();
+    $added = 0;
+    while ($added < 3) {
+        $date->modify('+1 day');
+        $dayOfWeek = (int)$date->format('N'); 
+        if ($dayOfWeek <= 5) { 
+            $added++;
+        }
+    }
+    return $date;
+}
+
+
+
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'book_appointment') {
     $department = trim($_POST['department'] ?? '');
-    $doctor     = trim($_POST['doctor'] ?? '');
-    $dateTime   = trim($_POST['appointment_datetime'] ?? '');
+    $doctor_id  = intval($_POST['doctor_id'] ?? 0);
+    $doctor_name = trim($_POST['doctor'] ?? '');
+    $bookDate   = trim($_POST['appointment_date'] ?? '');
+    $bookTime   = trim($_POST['appointment_time'] ?? '');
     $reason     = trim($_POST['reason'] ?? '');
 
-    if (empty($department) || empty($dateTime)) {
-        $booking_error = "Please choose a department and appointment time.";
+    $dateTime   = (!empty($bookDate) && !empty($bookTime)) ? ($bookDate . ' ' . $bookTime) : '';
+
+    
+    $attachmentPath = null;
+    $attachmentName = null;
+
+    if (isset($_FILES['patient_attachment']) && $_FILES['patient_attachment']['error'] === UPLOAD_ERR_OK) {
+        $file = $_FILES['patient_attachment'];
+        $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        $allowed = ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'mp4', 'webm'];
+
+        if (in_array($ext, $allowed)) {
+            $uploadDir = '../uploads/';
+            if (!is_dir($uploadDir)) {
+                mkdir($uploadDir, 0777, true);
+            }
+            $newFileName = 'attach_' . uniqid() . '.' . $ext;
+            $destination = $uploadDir . $newFileName;
+
+            if (move_uploaded_file($file['tmp_name'], $destination)) {
+                $attachmentPath = 'uploads/' . $newFileName;
+                $attachmentName = $file['name'];
+            }
+        }
+    }
+
+    
+    $selectedTimestamp = strtotime($dateTime);
+    $minAllowedDate = getMinBookingDate();
+    $minDateStr = $minAllowedDate->format('Y-m-d');
+    $dayOfWeek = (int)date('N', $selectedTimestamp);
+
+    if (empty($department) || empty($bookDate) || empty($bookTime)) {
+        $booking_error = "Please choose a department, date, and consultation time slot.";
+        $open_modal = 'bookModal';
+    } elseif ($bookDate < $minDateStr) {
+        $booking_error = "Booking policy violation: Same-day or rush bookings are disabled. Earliest allowed date is " . $minAllowedDate->format('M d, Y') . ".";
+        $open_modal = 'bookModal';
+    } elseif ($dayOfWeek === 7) {
+        $booking_error = "The clinic is closed on Sundays. Please select Monday through Saturday.";
+        $open_modal = 'bookModal';
+    } elseif ($department === 'Cardiology' && $dayOfWeek > 4) {
+        $booking_error = "Cardiology specialists are available Monday through Thursday only.";
+        $open_modal = 'bookModal';
+    } elseif ($department === 'Pediatrics' && $dayOfWeek > 5) {
+        $booking_error = "Pediatrics specialists are available Monday through Friday only.";
         $open_modal = 'bookModal';
     } else {
-        if (empty($doctor)) {
-            $doctor = "Dr. Assigned ($department Team)";
+        
+        if ($doctor_id <= 0 || empty($doctor_name)) {
+            $findDoc = $pdo->prepare("
+                SELECT id, full_name 
+                FROM users 
+                WHERE role = 'doctor' AND department = :dept 
+                ORDER BY RAND() 
+                LIMIT 1
+            ");
+            $findDoc->execute([':dept' => $department]);
+            $found = $findDoc->fetch(PDO::FETCH_ASSOC);
+
+            if ($found) {
+                $doctor_id = $found['id'];
+                $doctor_name = $found['full_name'];
+            } else {
+                $doctor_id = null;
+                $doctor_name = "On-Duty Attending ($department)";
+            }
         }
 
         try {
             $pdo->beginTransaction();
 
-            // GENERATE UNIQUE HOSPITAL BOOKING CODE
             $bookingCode = 'HSP-' . date('ym') . '-' . rand(1000, 9999);
 
             $stmt = $pdo->prepare("
-                INSERT INTO appointments (user_id, booking_code, department, doctor_name, appointment_datetime, reason, status)
-                VALUES (:user_id, :bcode, :dept, :doctor, :datetime, :reason, 'Confirmed')
+                INSERT INTO appointments (user_id, doctor_id, booking_code, department, doctor_name, appointment_datetime, reason, attachment_path, attachment_name, status)
+                VALUES (:user_id, :doc_id, :bcode, :dept, :doctor, :datetime, :reason, :attach_path, :attach_name, 'Pending')
             ");
             $stmt->execute([
-                ':user_id'  => $user_id,
-                ':bcode'    => $bookingCode,
-                ':dept'     => $department,
-                ':doctor'   => $doctor,
-                ':datetime' => $dateTime,
-                ':reason'   => $reason
+                ':user_id'     => $user_id,
+                ':doc_id'      => $doctor_id,
+                ':bcode'       => $bookingCode,
+                ':dept'        => $department,
+                ':doctor'      => $doctor_name,
+                ':datetime'    => $dateTime,
+                ':reason'      => $reason,
+                ':attach_path' => $attachmentPath,
+                ':attach_name' => $attachmentName
             ]);
             $appointment_id = $pdo->lastInsertId();
 
-            // Determine Recommended Lab
+            
             $labName = null;
             $labFee = 0.00;
             $labStatus = 'none';
@@ -72,7 +151,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $labStatus = 'pending';
             }
 
-            // Create ₱500 Base Billing
+            
             $invoiceNum = 'INV-' . date('Ymd') . '-' . rand(1000, 9999);
             $baseFee = 500.00;
 
@@ -84,7 +163,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 ':user_id'    => $user_id,
                 ':apt_id'     => $appointment_id,
                 ':inv_num'    => $invoiceNum,
-                ':descr'      => "Consultation [$bookingCode] - $department ($doctor)",
+                ':descr'      => "Consultation [$bookingCode] - $department ($doctor_name)",
                 ':base_fee'   => $baseFee,
                 ':lab_name'   => $labName,
                 ':lab_fee'    => $labFee,
@@ -92,18 +171,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 ':total_amt'  => $baseFee
             ]);
 
-            // Notification
             $notifStmt = $pdo->prepare("
                 INSERT INTO notifications (user_id, title, message, type)
-                VALUES (:user_id, 'Appointment Booked', :msg, 'confirmed')
+                VALUES (:user_id, 'Appointment Submitted (Pending)', :msg, 'reminder')
             ");
             $notifStmt->execute([
                 ':user_id' => $user_id,
-                ':msg'     => "Your visit with $doctor is confirmed. Reference Code: $bookingCode."
+                ':msg'     => "Your consultation with $doctor_name is Pending doctor confirmation. Reference: $bookingCode."
             ]);
 
             $pdo->commit();
-            $booking_msg = "Appointment scheduled! Your Reference Code is: <strong>$bookingCode</strong>. A ₱500.00 invoice was created under Billing.";
+            $booking_msg = "Appointment requested! Your booking is <strong>Pending Doctor Approval</strong>. Reference Code: <strong>$bookingCode</strong>.";
         } catch (PDOException $e) {
             $pdo->rollBack();
             $booking_error = "Database Error: " . $e->getMessage();
@@ -112,9 +190,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// ==========================================
-// 2. CANCEL APPOINTMENT WITH GUARANTEED ₱50 FINE (POST)
-// ==========================================
+
+
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'cancel_appointment') {
     $apt_id = intval($_POST['appointment_id'] ?? 0);
     $cancel_reason = trim($_POST['cancellation_reason'] ?? '');
@@ -132,8 +210,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
             $wasConfirmed = ($appointment['status'] === 'Confirmed');
             $code = !empty($appointment['booking_code']) ? $appointment['booking_code'] : ('#' . $apt_id);
+            $formattedDate = date('M d, Y h:i A', strtotime($appointment['appointment_datetime']));
 
-            // 1. Mark Appointment as Cancelled
             $updApt = $pdo->prepare("
                 UPDATE appointments 
                 SET status = 'Cancelled', cancellation_reason = :reason 
@@ -141,23 +219,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             ");
             $updApt->execute([':reason' => $cancel_reason, ':id' => $apt_id]);
 
-            // 2. Apply ₱50 Penalty Fee
+            if (!empty($appointment['doctor_id'])) {
+                $docNotifStmt = $pdo->prepare("
+                    INSERT INTO notifications (user_id, title, message, type)
+                    VALUES (:did, 'Appointment Cancelled by Patient', :msg, 'comment')
+                ");
+                $docNotifStmt->execute([
+                    ':did' => $appointment['doctor_id'],
+                    ':msg' => "Patient {$patient_full_name} cancelled consultation [{$code}] on {$formattedDate}. Reason: {$cancel_reason}"
+                ]);
+            }
+
             if ($wasConfirmed) {
-                // Check if a bill already exists for this appointment
                 $bCheck = $pdo->prepare("SELECT id FROM billings WHERE appointment_id = :apt_id LIMIT 1");
                 $bCheck->execute([':apt_id' => $apt_id]);
                 $existingBill = $bCheck->fetch(PDO::FETCH_ASSOC);
 
                 if ($existingBill) {
-                    // Update existing invoice to the ₱50 cancellation fee
                     $updBill = $pdo->prepare("
                         UPDATE billings 
-                        SET description = :desc, 
-                            base_fee = 50.00, 
-                            lab_fee = 0.00, 
-                            lab_status = 'declined', 
-                            total_amount = 50.00, 
-                            payment_status = 'Unpaid'
+                        SET description = :desc, base_fee = 50.00, lab_fee = 0.00, lab_status = 'declined', total_amount = 50.00, payment_status = 'Unpaid'
                         WHERE id = :bill_id
                     ");
                     $updBill->execute([
@@ -165,7 +246,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         ':bill_id' => $existingBill['id']
                     ]);
                 } else {
-                    // GUARANTEED INSERT: If no bill was linked, create a new ₱50 fine invoice!
                     $fineInvoiceNum = 'INV-FINE-' . date('Ymd') . '-' . rand(1000, 9999);
                     $insBill = $pdo->prepare("
                         INSERT INTO billings (user_id, appointment_id, invoice_number, description, base_fee, lab_fee, lab_status, total_amount, payment_status)
@@ -179,19 +259,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     ]);
                 }
 
-                // Create Notification
-                $notifStmt = $pdo->prepare("
-                    INSERT INTO notifications (user_id, title, message, type)
-                    VALUES (:user_id, 'Appointment Cancelled (Fine Added)', :msg, 'comment')
+                $booking_msg = "Appointment [$code] cancelled. Since this was already confirmed, a <strong>₱50.00 reservation fee</strong> was charged.";
+            } else {
+                $voidBill = $pdo->prepare("
+                    UPDATE billings 
+                    SET description = :desc, total_amount = 0.00, payment_status = 'Paid'
+                    WHERE appointment_id = :apt_id AND payment_status = 'Unpaid'
                 ");
-                $notifStmt->execute([
-                    ':user_id' => $user_id,
-                    ':msg'     => "Cancelled booking [$code] with " . $appointment['doctor_name'] . ". A ₱50.00 reservation fine was added to your billing."
+                $voidBill->execute([
+                    ':desc'   => "Voided (Pending Booking Cancelled) [$code]",
+                    ':apt_id' => $apt_id
                 ]);
 
-                $booking_msg = "Appointment [$code] cancelled. A <strong>₱50.00 doctor time reservation fee</strong> was added to your Billing & Statements.";
-            } else {
-                $booking_msg = "Booking [$code] cancelled.";
+                $booking_msg = "Appointment [$code] was cancelled while still Pending. <strong>No cancellation fee</strong> was charged.";
             }
 
             $pdo->commit();
@@ -202,9 +282,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// ==========================================
-// 3. PATIENT DECISION: ACCEPT OR DECLINE LAB
-// ==========================================
+
+
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'respond_lab') {
     $bill_id = intval($_POST['bill_id'] ?? 0);
     $decision = $_POST['decision'] ?? '';
@@ -229,9 +309,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// ==========================================
-// 4. SIMULATE SETTLING INVOICE (PAYMENT)
-// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'pay_invoice') {
     $bill_id = intval($_POST['bill_id'] ?? 0);
     $pStmt = $pdo->prepare("UPDATE billings SET payment_status = 'Paid' WHERE id = :id AND user_id = :user_id");
@@ -240,9 +317,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $open_modal = 'billingModal';
 }
 
-// ==========================================
-// 5. FETCH BILLINGS & TOTAL OUTSTANDING
-// ==========================================
+
+
+
 $billQuery = $pdo->prepare("SELECT * FROM billings WHERE user_id = :user_id ORDER BY created_at DESC");
 $billQuery->execute([':user_id' => $user_id]);
 $billings = $billQuery->fetchAll(PDO::FETCH_ASSOC);
@@ -254,23 +331,15 @@ foreach ($billings as $b) {
     }
 }
 
-// ==========================================
-// 6. FETCH DOCTORS, NOTIFICATIONS & APPOINTMENTS
-// ==========================================
-$docStmt = $pdo->prepare("SELECT full_name, department FROM users WHERE role = 'doctor'");
+$docStmt = $pdo->prepare("SELECT id, full_name, department FROM users WHERE role = 'doctor' AND department IS NOT NULL");
 $docStmt->execute();
 $dbDoctors = $docStmt->fetchAll(PDO::FETCH_ASSOC);
 
 $notifStmt = $pdo->prepare("SELECT * FROM notifications WHERE user_id = :user_id ORDER BY created_at DESC LIMIT 5");
 $notifStmt->execute([':user_id' => $user_id]);
 $notifications = $notifStmt->fetchAll(PDO::FETCH_ASSOC);
+$unreadCount = count(array_filter($notifications, fn($n) => $n['is_read'] == 0));
 
-$unreadCount = 0;
-foreach ($notifications as $n) {
-    if ($n['is_read'] == 0) $unreadCount++;
-}
-
-// Medical Records
 $recStmt = $pdo->prepare("
     SELECT mr.*, u.full_name AS doctor_name 
     FROM medical_records mr
@@ -281,12 +350,10 @@ $recStmt = $pdo->prepare("
 $recStmt->execute([':user_id' => $user_id]);
 $medicalRecords = $recStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Fetch All Appointments
 $fetchStmt = $pdo->prepare("SELECT * FROM appointments WHERE user_id = :user_id ORDER BY appointment_datetime ASC");
 $fetchStmt->execute([':user_id' => $user_id]);
 $appointments = $fetchStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Next upcoming active appointment
 $nextAppointment = null;
 $now = date('Y-m-d H:i:s');
 foreach ($appointments as $apt) {
@@ -295,6 +362,10 @@ foreach ($appointments as $apt) {
         break;
     }
 }
+
+
+$minDateObj = getMinBookingDate();
+$minDateOnly = $minDateObj->format('Y-m-d');
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -302,19 +373,13 @@ foreach ($appointments as $apt) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hosplinic | Patient Portal</title>
-    <!-- Google Font -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https:
+    <link rel="preconnect" href="https:
+    <link href="https:
     <link rel="stylesheet" href="../styles/patient.css">
 
     <style>
-        .alert {
-            padding: 0.75rem 1rem;
-            border-radius: var(--radius-md, 8px);
-            font-size: 0.875rem;
-            margin-bottom: 1.5rem;
-        }
+        .alert { padding: 0.75rem 1rem; border-radius: var(--radius-md, 8px); font-size: 0.875rem; margin-bottom: 1.5rem; }
         .alert--error { background-color: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
         .alert--success { background-color: #dcfce7; color: #15803d; border: 1px solid #86efac; }
         
@@ -326,6 +391,12 @@ foreach ($appointments as $apt) {
             cursor: not-allowed;
         }
         .auto-hint { font-size: 0.775rem; color: var(--text-muted); margin-top: 0.25rem; }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
 
         .booking-code-badge {
             display: inline-block;
@@ -340,7 +411,8 @@ foreach ($appointments as $apt) {
             letter-spacing: 0.05em;
         }
 
-        /* Notification Styling */
+        .pill--pending { background-color: #fef3c7; color: #b45309; }
+
         .notif-wrapper { position: relative; display: inline-block; }
         .notif-btn {
             background: #ffffff;
@@ -398,13 +470,7 @@ foreach ($appointments as $apt) {
         }
         .notif-header h4 { font-size: 0.9rem; color: var(--text-dark); font-weight: 700; margin: 0; }
         .notif-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; }
-        .notif-item {
-            padding: 0.85rem 1.1rem;
-            border-bottom: 1px solid var(--border-subtle);
-            display: flex;
-            gap: 0.75rem;
-            text-decoration: none;
-        }
+        .notif-item { padding: 0.85rem 1.1rem; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 0.75rem; text-decoration: none; }
         .notif-item.unread { background-color: #f0f9ff; }
         .notif-icon {
             width: 32px;
@@ -421,20 +487,9 @@ foreach ($appointments as $apt) {
         .notif-content p { font-size: 0.775rem; color: var(--text-body); line-height: 1.4; margin-bottom: 0.25rem; }
         .notif-content small { font-size: 0.7rem; color: var(--text-muted); }
 
-        /* Dashboard Split Layout */
-        .dashboard-layout {
-            display: grid;
-            grid-template-columns: 1fr 380px;
-            gap: 2rem;
-            align-items: start;
-        }
-        .cards-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-            gap: 1.5rem;
-        }
+        .dashboard-layout { display: grid; grid-template-columns: 1fr 380px; gap: 2rem; align-items: start; }
+        .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; }
 
-        /* Calendar Styling */
         .calendar-widget {
             background: var(--bg-surface);
             border: 1px solid var(--border-subtle);
@@ -508,16 +563,10 @@ foreach ($appointments as $apt) {
             align-items: flex-start;
             gap: 0.5rem;
         }
-
-        .agenda-card.cancelled {
-            border-left-color: #94a3b8;
-            opacity: 0.75;
-        }
-
+        .agenda-card.cancelled { border-left-color: #94a3b8; opacity: 0.75; }
         .agenda-card h5 { font-size: 0.875rem; color: var(--text-dark); margin-bottom: 0.25rem; }
         .agenda-card p { font-size: 0.775rem; color: var(--text-muted); margin: 0 0 0.2rem 0; }
 
-        /* Invoice Card Styles */
         .invoice-card {
             background: var(--bg-body);
             border: 1px solid var(--border-subtle);
@@ -543,6 +592,7 @@ foreach ($appointments as $apt) {
 
         @media (max-width: 992px) {
             .dashboard-layout { grid-template-columns: 1fr; }
+            .form-row { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -557,7 +607,6 @@ foreach ($appointments as $apt) {
         
         <div class="navbar__actions" style="display: flex; align-items: center; gap: 1rem;">
             
-            <!-- NOTIFICATION BELL -->
             <div class="notif-wrapper">
                 <button type="button" class="notif-btn" id="notifBtn" aria-label="Notifications">
                     <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -568,7 +617,6 @@ foreach ($appointments as $apt) {
                     <?php endif; ?>
                 </button>
 
-                <!-- Dropdown -->
                 <div class="notif-dropdown" id="notifDropdown">
                     <div class="notif-header">
                         <h4>Notifications</h4>
@@ -607,7 +655,6 @@ foreach ($appointments as $apt) {
 
     <main class="dashboard" style="max-width: 1200px;">
 
-        <!-- Welcome Banner with Reference Code -->
         <div class="dashboard__banner">
             <div>
                 <h2>Welcome Back, <?= $patient_first_name ?></h2>
@@ -616,8 +663,11 @@ foreach ($appointments as $apt) {
             <div class="banner-notice">
                 <?php if ($nextAppointment): ?>
                     <span>Next Visit: <strong><?= date('M d, Y \a\t h:i A', strtotime($nextAppointment['appointment_datetime'])) ?></strong> (<?= htmlspecialchars($nextAppointment['doctor_name']) ?>)</span>
-                    <div style="margin-top: 0.25rem;">
+                    <div style="margin-top: 0.25rem; display: flex; align-items: center; gap: 0.4rem;">
                         Reference: <span class="booking-code-badge"><?= htmlspecialchars($nextAppointment['booking_code']) ?></span>
+                        <span class="pill <?= $nextAppointment['status'] === 'Confirmed' ? 'pill--ok' : 'pill--pending' ?>">
+                            <?= htmlspecialchars($nextAppointment['status']) ?>
+                        </span>
                     </div>
                 <?php else: ?>
                     <span>No upcoming appointments scheduled.</span>
@@ -632,12 +682,8 @@ foreach ($appointments as $apt) {
             <div class="alert alert--error"><?= htmlspecialchars($booking_error) ?></div>
         <?php endif; ?>
 
-        <!-- ==========================================
-             DASHBOARD SPLIT: CARDS (LEFT) & CALENDAR (RIGHT)
-             ========================================== -->
         <div class="dashboard-layout">
             
-            <!-- 1. LEFT: CARDS IN GRID LAYOUT -->
             <div class="cards-grid">
                 
                 <!-- Card 1: Add Appointment -->
@@ -649,13 +695,13 @@ foreach ($appointments as $apt) {
                             </svg>
                         </div>
                         <h3 class="card__title">Book Appointment</h3>
-                        <p class="card__desc">Consultation fee: <strong>₱500.00</strong>. Each booking generates an official hospital reference code.</p>
+                        <p class="card__desc">Choose your department. Must be booked at least 3 business days in advance.</p>
                         
                         <div class="pill-group">
-                            <span class="pill pill--ok">Base Fee: ₱500.00</span>
+                            <span class="pill pill--pending">3 Working Days Advance Policy</span>
                         </div>
                     </div>
-                    <span class="card__link">+ Schedule Visit Now &rarr;</span>
+                    <span class="card__link">+ Request Visit Now &rarr;</span>
                 </div>
 
                 <!-- Card 2: Billing & Statements -->
@@ -700,7 +746,7 @@ foreach ($appointments as $apt) {
 
             </div>
 
-            <!-- 2. RIGHT: LIVE DASHBOARD CALENDAR (WITH DOTS) -->
+            <!-- RIGHT: LIVE CALENDAR WIDGET WITH DOTS -->
             <div class="calendar-widget">
                 <div class="calendar-header">
                     <h3 id="calendarMonthYear">Month Year</h3>
@@ -714,34 +760,27 @@ foreach ($appointments as $apt) {
                     <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
                 </div>
 
-                <div class="calendar-days" id="calendarDays">
-                    <!-- Populated automatically on dashboard load -->
-                </div>
+                <div class="calendar-days" id="calendarDays"></div>
 
                 <p style="font-size: 0.775rem; color: var(--text-muted); margin-top: 0.75rem; display: flex; align-items: center; gap: 0.4rem;">
                     <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--accent-teal);"></span>
                     Days with dots have scheduled doctor visits.
                 </p>
 
-                <!-- Daily Agenda with Cancel Option & Booking Reference Codes -->
                 <div class="calendar-agenda">
                     <div class="agenda-header">
                         <h4>Appointments for Date:</h4>
                         <span id="selectedDateText">Today</span>
                     </div>
 
-                    <div class="agenda-list" id="dashboardAgendaList">
-                        <!-- Injected on date click -->
-                    </div>
+                    <div class="agenda-list" id="dashboardAgendaList"></div>
                 </div>
             </div>
 
         </div>
     </main>
 
-    <!-- ==========================================
-         MODAL: CANCEL APPOINTMENT CONFIRMATION
-         ========================================== -->
+    <!-- MODAL: CANCEL APPOINTMENT CONFIRMATION -->
     <div class="modal-overlay" id="cancelModal" aria-hidden="true">
         <div class="modal">
             <div class="modal__header">
@@ -753,11 +792,10 @@ foreach ($appointments as $apt) {
                     <input type="hidden" name="action" value="cancel_appointment">
                     <input type="hidden" name="appointment_id" id="cancel_apt_id" value="">
 
-                    <div style="background: #fffbeb; border: 1px solid #fde68a; padding: 0.85rem; border-radius: var(--radius-md); font-size: 0.825rem; color: #92400e; margin-bottom: 1rem;">
-                        <strong>&#9888; Physician Time Reservation Policy:</strong>
-                        <p style="margin: 0.35rem 0 0 0;">
-                            Cancelling Reference: <span class="booking-code-badge" id="cancel_display_code">HSP-0000</span><br>
-                            Because this slot was reserved by the physician, a <strong>₱50.00 reservation fee</strong> will be billed.
+                    <div id="cancelFeeNotice" style="background: #fffbeb; border: 1px solid #fde68a; padding: 0.85rem; border-radius: var(--radius-md); font-size: 0.825rem; color: #92400e; margin-bottom: 1rem;">
+                        <strong>&#9888; Cancellation Notice:</strong>
+                        <p style="margin: 0.35rem 0 0 0;" id="cancelNoticeText">
+                            Cancelling Reference: <span class="booking-code-badge" id="cancel_display_code">HSP-0000</span>
                         </p>
                     </div>
 
@@ -772,8 +810,8 @@ foreach ($appointments as $apt) {
                     </div>
 
                     <div class="modal-actions" style="margin-top: 1.25rem;">
-                        <button type="submit" class="btn btn--primary" style="background:#dc2626; flex:1;">
-                            Confirm Cancellation (₱50 Fee)
+                        <button type="submit" class="btn btn--primary" style="background:#dc2626; flex:1;" id="confirmCancelSubmitBtn">
+                            Confirm Cancellation
                         </button>
                         <button type="button" class="btn btn--outline" data-close="cancelModal">Keep Appointment</button>
                     </div>
@@ -782,7 +820,9 @@ foreach ($appointments as $apt) {
         </div>
     </div>
 
-    <!-- MODAL: BOOK APPOINTMENT -->
+    <!-- ====================================================================
+         MODAL: BOOK APPOINTMENT (NATIVELY DISABLED DATES & REAL TIME SLOTS)
+         ==================================================================== -->
     <div class="modal-overlay" id="bookModal" aria-hidden="true">
         <div class="modal">
             <div class="modal__header">
@@ -790,17 +830,23 @@ foreach ($appointments as $apt) {
                 <button class="modal__close" data-close="bookModal">&times;</button>
             </div>
             <div class="modal__body">
-                <form action="patient.php" method="POST" class="patient-form">
+                <form action="patient.php" method="POST" enctype="multipart/form-data" class="patient-form" id="bookAppointmentForm">
                     <input type="hidden" name="action" value="book_appointment">
+                    <input type="hidden" name="doctor_id" id="autoDoctorId" value="">
+
+                    <!-- Advance Booking Policy Banner -->
+                    <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 0.75rem 1rem; border-radius: var(--radius-md); font-size: 0.8rem; color: #1e40af; margin-bottom: 0.5rem;">
+                        &#128197; <strong>Scheduling Policy:</strong> Previous dates, same-day, and the next 3 business days are <strong>strictly disabled</strong> on the calendar below.
+                    </div>
 
                     <div class="form-group">
                         <label for="deptSelect">Select Medical Department</label>
                         <select name="department" id="deptSelect" required>
                             <option value="">-- Choose a Department --</option>
-                            <option value="Cardiology">Cardiology</option>
-                            <option value="Pediatrics">Pediatrics</option>
-                            <option value="Dermatology">Dermatology</option>
-                            <option value="General Medicine">General Medicine</option>
+                            <option value="Cardiology">Cardiology (Mon – Thu, 8am–4pm)</option>
+                            <option value="Pediatrics">Pediatrics (Mon – Fri, 9am–3:30pm)</option>
+                            <option value="Dermatology">Dermatology (Tue – Sat, 10am–5pm)</option>
+                            <option value="General Medicine">General Medicine (Mon – Sat, 8am–5pm)</option>
                         </select>
                     </div>
 
@@ -815,12 +861,40 @@ foreach ($appointments as $apt) {
                             readonly 
                             required
                         >
-                        <span class="auto-hint" id="autoHintText">The specialist will be assigned automatically based on clinic availability.</span>
+                        <span class="auto-hint" id="autoHintText">The attending specialist will be assigned automatically based on clinic availability.</span>
                     </div>
 
-                    <div class="form-group">
-                        <label for="bookDateTime">Date & Preferred Time</label>
-                        <input type="datetime-local" name="appointment_datetime" id="bookDateTime" required>
+                    <!-- SEPARATED DATE & REAL TIME SLOTS (NATIVELY DISABLED PAST/3-DAY WINDOW) -->
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="bookDate">Consultation Date</label>
+                            <input 
+                                type="date" 
+                                name="appointment_date" 
+                                id="bookDate" 
+                                min="<?= $minDateOnly ?>" 
+                                required
+                            >
+                            <span class="auto-hint" id="dateHint" style="color: #0369a1;">
+                                Earliest: <strong><?= $minDateObj->format('M d, Y') ?></strong>
+                            </span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="bookTime">Time Slot</label>
+                            <select name="appointment_time" id="bookTime" required>
+                                <option value="">Select Time...</option>
+                                <option value="08:00:00">08:00 AM</option>
+                                <option value="09:00:00">09:00 AM</option>
+                                <option value="10:00:00">10:00 AM</option>
+                                <option value="11:00:00">11:00 AM</option>
+                                <option value="13:00:00">01:00 PM</option>
+                                <option value="14:00:00">02:00 PM</option>
+                                <option value="15:00:00">03:00 PM</option>
+                                <option value="16:00:00">04:00 PM</option>
+                            </select>
+                            <span class="auto-hint">Regular clinic hours</span>
+                        </div>
                     </div>
 
                     <div class="form-group">
@@ -828,11 +902,27 @@ foreach ($appointments as $apt) {
                         <textarea name="reason" id="bookNotes" rows="2" placeholder="Briefly describe your symptoms or concern..."></textarea>
                     </div>
 
-                    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 0.75rem; border-radius: var(--radius-md); font-size: 0.8rem; color: #166534;">
-                        &#128179; <strong>Billing & Check-in Notice:</strong> An initial consultation fee of <strong>₱500.00</strong> will be invoiced, and a unique <strong>Reference Code</strong> will be assigned upon confirmation.
+                    <div class="form-group">
+                        <label for="patientAttachment">Medical Attachment (Optional)</label>
+                        <input 
+                            type="file" 
+                            name="patient_attachment" 
+                            id="patientAttachment" 
+                            accept=".jpg,.jpeg,.png,.pdf,.doc,.docx,.mp4,.webm"
+                        >
+                        <span class="auto-hint">Attach symptom photos, previous laboratory/ECG PDFs, or video clips (MP4/WebM).</span>
                     </div>
 
-                    <div class="modal-actions">
+                    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 0.85rem; border-radius: var(--radius-md); font-size: 0.8rem; color: #166534; display: flex; flex-direction: column; gap: 0.35rem;">
+                        <div>
+                            &#128179; <strong>Billing Notice:</strong> An initial consultation fee of <strong>₱500.00</strong> will be invoiced to your account upon booking.
+                        </div>
+                        <div style="font-size: 0.775rem; color: #15803d;">
+                            &#9203; <em>Status: Your request will be recorded as <strong>Pending</strong> until approved by the attending specialist.</em>
+                        </div>
+                    </div>
+
+                    <div class="modal-actions" style="margin-top: 1rem;">
                         <button type="submit" class="btn btn--primary" style="flex:1;">Confirm & Book (₱500)</button>
                         <button type="button" class="btn btn--outline" data-close="bookModal">Cancel</button>
                     </div>
@@ -982,12 +1072,22 @@ foreach ($appointments as $apt) {
         <p>&copy; <?= date('Y') ?> Hosplinic Management System &bull; Patient Care Portal</p>
     </footer>
 
-    <!-- Interactive Scripts -->
+    <!-- Scripts -->
     <script>
         const registeredDoctors = <?= json_encode($dbDoctors) ?>;
         const patientAppointments = <?= json_encode($appointments) ?>;
+        const minDateOnly = "<?= $minDateOnly ?>";
 
-        // Notification dropdown toggle
+        const departmentRules = {
+            'Cardiology': { days: [1, 2, 3, 4], label: 'Mon – Thu (08:00 AM – 04:00 PM)' },
+            'Pediatrics': { days: [1, 2, 3, 4, 5], label: 'Mon – Fri (09:00 AM – 03:30 PM)' },
+            'Dermatology': { days: [2, 3, 4, 5, 6], label: 'Tue – Sat (10:00 AM – 05:00 PM)' },
+            'General Medicine': { days: [1, 2, 3, 4, 5, 6], label: 'Mon – Sat (08:00 AM – 05:00 PM)' }
+        };
+
+        
+        
+        
         const notifBtn = document.getElementById('notifBtn');
         const notifDropdown = document.getElementById('notifDropdown');
 
@@ -1004,35 +1104,82 @@ foreach ($appointments as $apt) {
             });
         }
 
-        // Auto-assign doctor based on department
         const deptSelect = document.getElementById('deptSelect');
         const autoDoctorInput = document.getElementById('autoDoctorInput');
+        const autoDoctorId = document.getElementById('autoDoctorId');
         const autoHintText = document.getElementById('autoHintText');
+        const bookDateInput = document.getElementById('bookDate');
+        const dateHint = document.getElementById('dateHint');
 
+        
         if (deptSelect) {
             deptSelect.addEventListener('change', function() {
                 const selectedDept = this.value;
                 if (!selectedDept) {
                     autoDoctorInput.value = "Select a department above...";
-                    autoHintText.innerText = "The specialist will be assigned automatically based on clinic availability.";
+                    autoDoctorId.value = "";
+                    autoHintText.innerText = "The attending doctor will review and approve your requested appointment slot.";
                     return;
                 }
 
-                const matchedDoctor = registeredDoctors.find(doc => 
+                const matchingDoctors = registeredDoctors.filter(doc => 
                     doc.department && doc.department.toLowerCase() === selectedDept.toLowerCase()
                 );
 
-                if (matchedDoctor) {
-                    autoDoctorInput.value = matchedDoctor.full_name;
-                    autoHintText.innerHTML = `&#10003; <strong>${matchedDoctor.full_name}</strong> is assigned for ${selectedDept}.`;
+                if (matchingDoctors.length > 0) {
+                    const randomIndex = Math.floor(Math.random() * matchingDoctors.length);
+                    const selectedDoctor = matchingDoctors[randomIndex];
+
+                    autoDoctorInput.value = selectedDoctor.full_name;
+                    autoDoctorId.value = selectedDoctor.id;
+                    autoHintText.innerHTML = `&#10003; <strong>${selectedDoctor.full_name}</strong> was assigned for your ${selectedDept} consultation.`;
                 } else {
                     autoDoctorInput.value = `Attending Physician (${selectedDept})`;
-                    autoHintText.innerText = `An on-call specialist from ${selectedDept} will take your consultation.`;
+                    autoDoctorId.value = "";
+                    autoHintText.innerText = `An on-call specialist from ${selectedDept} will review your request.`;
+                }
+
+                
+                if (bookDateInput.value) {
+                    validatePickedDate(bookDateInput.value, selectedDept);
                 }
             });
         }
 
-        // Live Dashboard Calendar
+        
+        function validatePickedDate(dateVal, selectedDept) {
+            const picked = new Date(dateVal + 'T00:00:00');
+            const dayOfWeek = picked.getDay(); 
+
+            
+            if (dayOfWeek === 0) {
+                alert("The outpatient clinic is closed on Sundays. Please select a day from Monday to Saturday.");
+                bookDateInput.value = "";
+                return;
+            }
+
+            
+            if (selectedDept && departmentRules[selectedDept]) {
+                const rule = departmentRules[selectedDept];
+                const isoDay = dayOfWeek === 0 ? 7 : dayOfWeek;
+
+                if (!rule.days.includes(isoDay)) {
+                    alert(`Availability Notice: Doctors in ${selectedDept} are only available on: ${rule.label}. Please pick an active shift day.`);
+                    bookDateInput.value = "";
+                    return;
+                }
+            }
+        }
+
+        if (bookDateInput) {
+            bookDateInput.addEventListener('change', function() {
+                if (this.value) {
+                    validatePickedDate(this.value, deptSelect.value);
+                }
+            });
+        }
+
+        
         let calendarDate = new Date();
         let selectedDayDate = new Date();
         const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -1099,10 +1246,21 @@ foreach ($appointments as $apt) {
             updateDashboardAgenda(activeKey, selectedDayDate.getDate());
         }
 
-        // Open Cancel Modal Function with Booking Code preview
-        function promptCancelAppointment(aptId, bookingCode) {
+        function promptCancelAppointment(aptId, bookingCode, status) {
             document.getElementById('cancel_apt_id').value = aptId;
             document.getElementById('cancel_display_code').innerText = bookingCode;
+
+            const noticeText = document.getElementById('cancelNoticeText');
+            const submitBtn = document.getElementById('confirmCancelSubmitBtn');
+
+            if (status === 'Confirmed') {
+                noticeText.innerHTML = `Cancelling Reference: <span class="booking-code-badge">${bookingCode}</span><br>Because this slot was <strong>Confirmed by the physician</strong>, a <strong>₱50.00 reservation fee</strong> will be billed.`;
+                submitBtn.innerText = "Confirm Cancellation (₱50 Fee)";
+            } else {
+                noticeText.innerHTML = `Cancelling Reference: <span class="booking-code-badge">${bookingCode}</span><br>This visit is still <strong>Pending Approval</strong>. It will be cancelled <strong>without any cancellation fee (₱0.00)</strong>.`;
+                submitBtn.innerText = "Confirm Cancellation (No Fee)";
+            }
+
             openModal('cancelModal');
         }
 
@@ -1126,17 +1284,21 @@ foreach ($appointments as $apt) {
                     let cancelBtnHtml = '';
                     if (!isCancelled) {
                         cancelBtnHtml = `
-                            <button type="button" onclick="promptCancelAppointment(${apt.id}, '${code}')" class="btn btn--outline" style="padding: 0.35rem 0.65rem; font-size: 0.725rem; color: #dc2626; border-color: #fca5a5;">
+                            <button type="button" onclick="promptCancelAppointment(${apt.id}, '${code}', '${apt.status}')" class="btn btn--outline" style="padding: 0.35rem 0.65rem; font-size: 0.725rem; color: #dc2626; border-color: #fca5a5;">
                                 Cancel
                             </button>
                         `;
                     }
 
+                    let statusBadgeClass = 'pill--ok';
+                    if (apt.status === 'Pending') statusBadgeClass = 'pill--pending';
+                    else if (isCancelled) statusBadgeClass = 'pill--neutral';
+
                     card.innerHTML = `
                         <div>
                             <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem;">
                                 <span class="booking-code-badge">${code}</span>
-                                <span class="pill ${isCancelled ? 'pill--neutral' : 'pill--ok'}" style="font-size: 0.7rem;">
+                                <span class="pill ${statusBadgeClass}" style="font-size: 0.7rem;">
                                     ${apt.status}
                                 </span>
                             </div>
@@ -1172,7 +1334,6 @@ foreach ($appointments as $apt) {
 
         renderDashboardCalendar();
 
-        // Modals Logic
         function openModal(id) {
             const modal = document.getElementById(id);
             if (modal) {

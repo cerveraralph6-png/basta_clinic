@@ -1,8 +1,6 @@
-/* ==========================================
-   1. DESIGN TOKENS / VARIABLES
-   ========================================== */
+
 :root {
-  --primary: #0284c7;        /* Medical Sky Blue */
+  --primary: #0284c7;       
   --primary-dark: #0369a1;
   --primary-light: #e0f2fe;
 
@@ -28,9 +26,7 @@
   --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* ==========================================
-   2. RESET & BASE
-   ========================================== */
+
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -48,9 +44,7 @@ body {
   flex-direction: column;
 }
 
-/* ==========================================
-   3. NAVBAR
-   ========================================== */
+
 .navbar {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(8px);
@@ -83,7 +77,7 @@ body {
   color: var(--text-dark);
 }
 
-/* Button Components */
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -135,9 +129,7 @@ body {
   border-color: #cbd5e1;
 }
 
-/* ==========================================
-   4. DASHBOARD / MAIN
-   ========================================== */
+
 .dashboard {
   flex: 1;
   max-width: 1000px;
@@ -154,7 +146,7 @@ body {
   padding: 1.5rem;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-subtle);
-  width: 50%;
+  width: 100%;
   margin: auto;
   margin-bottom: 50px;
 }
@@ -176,9 +168,7 @@ body {
   gap: 2rem;
 }
 
-/* ==========================================
-   5. CARDS
-   ========================================== */
+
 .card {
   background: var(--bg-surface);
   border-radius: var(--radius-lg);
@@ -253,9 +243,7 @@ body {
   gap: 0.55rem;
 }
 
-/* ==========================================
-   6. MODAL SYSTEM
-   ========================================== */
+
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -331,7 +319,7 @@ body {
   padding: 1.75rem;
 }
 
-/* Form Styles inside Modal */
+
 .divider {
   display: flex;
   align-items: center;
@@ -394,9 +382,7 @@ body {
   display: none;
 }
 
-/* ==========================================
-   7. CALENDAR STYLES
-   ========================================= */
+
 .calendar-layout {
   display: grid;
   grid-template-columns: 1.4fr 1fr;
@@ -499,7 +485,7 @@ body {
   background-color: #ffffff;
 }
 
-/* Agenda / Schedule Detail Panel */
+
 .calendar-agenda {
   background: var(--bg-body);
   border: 1px solid var(--border-subtle);
@@ -548,9 +534,7 @@ body {
   color: var(--text-muted);
 }
 
-/* ==========================================
-   8. FOOTER
-   ========================================== */
+
 .footer {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(8px);

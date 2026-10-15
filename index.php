@@ -2,9 +2,118 @@
 session_start();
 require_once 'db.php';
 
+$google_client_id = '400820330228-fobmbu7882pm3dd393vv0dpe43735rpm.apps.googleusercontent.com';
+
 $auth_error = '';
 $auth_success = '';
 $open_modal_on_load = ''; 
+
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'confirm_google_register') {
+    if (isset($_SESSION['pending_google_user'])) {
+        $name  = $_SESSION['pending_google_user']['name'];
+        $email = $_SESSION['pending_google_user']['email'];
+        $phone = trim($_POST['phoneNumber'] ?? 'Google Account');
+
+        $randomPassword = password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT);
+        $insertStmt = $pdo->prepare("
+            INSERT INTO users (full_name, identifier, phone_number, password_hash, role)
+            VALUES (:name, :email, :phone, :pass, 'patient')
+        ");
+        $insertStmt->execute([
+            ':name'  => $name,
+            ':email' => $email,
+            ':phone' => $phone,
+            ':pass'  => $randomPassword
+        ]);
+
+        $newUserId = $pdo->lastInsertId();
+
+        unset($_SESSION['pending_google_user']);
+
+        $_SESSION['user_id']   = $newUserId;
+        $_SESSION['user_name'] = $name;
+        $_SESSION['user_role'] = 'patient';
+
+        header("Location: patient/patient.php");
+        exit;
+    }
+}
+
+
+
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'google_login') {
+    $jwt = $_POST['credential'] ?? '';
+    $auth_source = $_POST['auth_source'] ?? 'login';
+
+    if (!empty($jwt)) {
+        $parts = explode(".", $jwt);
+        if (count($parts) === 3) {
+            $payload = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $parts[1])), true);
+
+            if ($payload && isset($payload['email'])) {
+                $email = trim($payload['email']);
+                $name  = trim($payload['name'] ?? 'Google User');
+
+                $stmt = $pdo->prepare("SELECT * FROM users WHERE identifier = :email LIMIT 1");
+                $stmt->execute([':email' => $email]);
+                $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                if ($user) {
+                    $_SESSION['user_id']   = $user['id'];
+                    $_SESSION['user_name'] = $user['full_name'];
+                    $_SESSION['user_role'] = $user['role'];
+
+                    if ($user['role'] === 'admin') {
+                        header("Location: admin/admin.php");
+                        exit;
+                    } elseif ($user['role'] === 'doctor') {
+                        header("Location: doctor/doctor.php");
+                        exit;
+                    } else {
+                        header("Location: patient/patient.php");
+                        exit;
+                    }
+                } else {
+                    if ($auth_source === 'login') {
+                        $_SESSION['pending_google_user'] = [
+                            'email' => $email,
+                            'name'  => $name
+                        ];
+                        $auth_error = "No account found for <strong>$email</strong>. You can register an account below if you wish.";
+                        $open_modal_on_load = 'googleConfirmModal';
+                    } else {
+                        $randomPassword = password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT);
+                        $insertStmt = $pdo->prepare("
+                            INSERT INTO users (full_name, identifier, phone_number, password_hash, role)
+                            VALUES (:name, :email, 'Google Account', :pass, 'patient')
+                        ");
+                        $insertStmt->execute([
+                            ':name'  => $name,
+                            ':email' => $email,
+                            ':pass'  => $randomPassword
+                        ]);
+
+                        $newUserId = $pdo->lastInsertId();
+
+                        $_SESSION['user_id']   = $newUserId;
+                        $_SESSION['user_name'] = $name;
+                        $_SESSION['user_role'] = 'patient';
+
+                        header("Location: patient/patient.php");
+                        exit;
+                    }
+                }
+            } else {
+                $auth_error = "Could not verify Google account.";
+                $open_modal_on_load = 'loginModal';
+            }
+        }
+    }
+}
+
+
 
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'register') {
@@ -32,7 +141,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $auth_error = "This Email or Username is already registered.";
             $open_modal_on_load = 'registerModal';
         } else {
-
             $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
 
             $insertStmt = $pdo->prepare("
@@ -57,6 +165,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
     }
 }
+
+
+
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'login') {
     $loginIdentifier = trim($_POST['loginIdentifier'] ?? '');
@@ -91,6 +202,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
     }
 }
+
+
+
+
+$docScheduleStmt = $pdo->prepare("
+    SELECT id, full_name, department, phone_number 
+    FROM users 
+    WHERE role = 'doctor' AND department IS NOT NULL 
+    ORDER BY department ASC, full_name ASC
+");
+$docScheduleStmt->execute();
+$publicDoctors = $docScheduleStmt->fetchAll(PDO::FETCH_ASSOC);
+
+
+function getDoctorShift($dept) {
+    switch ($dept) {
+        case 'Cardiology':
+            return ['days' => 'Mon – Thu', 'hours' => '08:00 AM – 04:00 PM', 'room' => 'Room 302B (Heart Wing)'];
+        case 'Pediatrics':
+            return ['days' => 'Mon – Fri', 'hours' => '09:00 AM – 03:30 PM', 'room' => 'Room 105 (Children Care)'];
+        case 'Dermatology':
+            return ['days' => 'Tue – Sat', 'hours' => '10:00 AM – 05:00 PM', 'room' => 'Room 204 (Skin Clinic)'];
+        case 'General Medicine':
+            return ['days' => 'Mon – Sat', 'hours' => '08:00 AM – 06:00 PM', 'room' => 'OPD Consultation Wing'];
+        default:
+            return ['days' => 'Mon – Fri', 'hours' => '09:00 AM – 04:00 PM', 'room' => 'General Clinical Wing'];
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -98,11 +237,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hosplinic Management System</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https:
+    <link rel="preconnect" href="https:
+    <link href="https:
     <link rel="stylesheet" href="styles/index.css">
     
+    <script src="https:
+
     <style>
         .modal-switch-text {
             text-align: center;
@@ -124,15 +265,97 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             font-size: 0.875rem;
             margin-bottom: 1rem;
         }
-        .alert--error {
-            background-color: #fee2e2;
-            color: #b91c1c;
-            border: 1px solid #fca5a5;
+        .alert--error { background-color: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+        .alert--success { background-color: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+        .alert--info { background-color: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+
+        .google-btn-container {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+            margin-bottom: 0.5rem;
         }
-        .alert--success {
-            background-color: #dcfce7;
-            color: #15803d;
-            border: 1px solid #86efac;
+
+       
+        .clinic-hours-banner {
+            background: #f8fafc;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+            margin-bottom: 1.5rem;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .clinic-hours-item h5 {
+            font-size: 0.825rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.25rem;
+        }
+
+        .clinic-hours-item p {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--text-dark);
+            margin: 0;
+        }
+
+        .doctor-schedule-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.85rem;
+            max-height: 380px;
+            overflow-y: auto;
+            padding-right: 0.25rem;
+        }
+
+        .doctor-schedule-item {
+            background: #ffffff;
+            border: 1px solid var(--border-subtle);
+            border-left: 4px solid var(--primary);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.25rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            transition: var(--transition);
+        }
+
+        .doctor-schedule-item:hover {
+            box-shadow: var(--shadow-sm);
+            border-left-color: var(--accent-teal);
+        }
+
+        .doc-info h4 {
+            font-size: 1rem;
+            color: var(--text-dark);
+            margin-bottom: 0.25rem;
+        }
+
+        .doc-info p {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin: 0;
+        }
+
+        .doc-timing {
+            text-align: right;
+        }
+
+        .doc-timing strong {
+            display: block;
+            font-size: 0.875rem;
+            color: var(--primary-dark);
+        }
+
+        .doc-timing small {
+            font-size: 0.75rem;
+            color: var(--text-muted);
         }
     </style>
 </head>
@@ -158,39 +381,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
     <main class="dashboard">
         <div class="dashboard__intro">
-            <h2>Hospital Portal</h2>
-            <p>Select an option below to manage clinic operations</p>
+            <h2>Hosplinic</h2>
+            <p>Access patient services, check doctor schedules, and manage clinical consultations.</p>
         </div>
 
         <div class="dashboard__grid">
+            <!-- Card 1: Register Account -->
             <div class="card" id="openRegisterModal" role="button" tabindex="0">
                 <div>
                     <div class="card__icon card__icon--blue">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <svg xmlns="http:
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
                         </svg>
                     </div>
-                    <h3 class="card__title">Register Account</h3>
-                    <p class="card__desc">Create a new patient or staff profile with Google or your credentials to access the system.</p>
+                    <h3 class="card__title">Patient Registration</h3>
+                    <p class="card__desc">Create a new patient account using Google or your credentials to book and manage visits.</p>
                 </div>
                 <span class="card__link">Register Now &rarr;</span>
             </div>
 
+            <!-- Card 2: RENAMED TO "Doctors appointment availability schedule and clinic hours" -->
             <div class="card" id="openScheduleModal" role="button" tabindex="0">
                 <div>
                     <div class="card__icon card__icon--teal">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        <svg xmlns="http:
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                     </div>
-                    <h3 class="card__title">Appointment Schedule</h3>
-                    <p class="card__desc">Browse the full monthly clinic calendar, inspect booked slots, and check doctor availability.</p>
+                    <h3 class="card__title">Doctors' Availability Schedule & Clinic Hours</h3>
+                    <p class="card__desc">Check when our medical specialists are available, view weekly shift timings, and review clinic hours.</p>
+                    
+                    <div style="margin-top: 1rem;">
+                        <span class="pill pill--ok"><?= count($publicDoctors) ?> Specialists on Duty</span>
+                    </div>
                 </div>
-                <span class="card__link">View Calendar &rarr;</span>
+                <span class="card__link">View Availability & Hours &rarr;</span>
             </div>
         </div>
     </main>
 
+    <!-- Hidden Form to submit Google JWT Token to PHP -->
+    <form id="googleAuthForm" action="index.php" method="POST" style="display: none;">
+        <input type="hidden" name="action" value="google_login">
+        <input type="hidden" name="auth_source" id="googleAuthSource" value="login">
+        <input type="hidden" name="credential" id="googleCredentialInput">
+    </form>
+
+    <!-- ==========================================
+         LOGIN MODAL
+         ========================================== -->
     <div class="modal-overlay" id="loginModal" aria-hidden="true">
         <div class="modal">
             <div class="modal__header">
@@ -207,15 +446,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     <div class="alert alert--error"><?= htmlspecialchars($auth_error) ?></div>
                 <?php endif; ?>
 
-                <button type="button" class="btn btn--google">
-                    <svg width="18" height="18" viewBox="0 0 18 18">
-                        <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.616z"/>
-                        <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
-                        <path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707 0-.59.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.347 2.825.957 4.039l3.007-2.332z"/>
-                        <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/>
-                    </svg>
-                    Continue with Gmail
-                </button>
+                <div class="google-btn-container" onclick="setGoogleSource('login')">
+                    <div id="googleSignInButtonLogin"></div>
+                </div>
 
                 <div class="divider">or login with credentials</div>
 
@@ -224,24 +457,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
                     <div class="form-group">
                         <label for="loginIdentifier">Email or Username</label>
-                        <input 
-                            type="text" 
-                            id="loginIdentifier" 
-                            name="loginIdentifier" 
-                            placeholder="Enter your email or username" 
-                            required
-                        >
+                        <input type="text" id="loginIdentifier" name="loginIdentifier" placeholder="Enter your email or username" required>
                     </div>
 
                     <div class="form-group">
                         <label for="loginPassword">Password</label>
-                        <input 
-                            type="password" 
-                            id="loginPassword" 
-                            name="loginPassword" 
-                            placeholder="••••••••" 
-                            required
-                        >
+                        <input type="password" id="loginPassword" name="loginPassword" placeholder="••••••••" required>
                     </div>
 
                     <button type="submit" class="btn btn--primary" style="width: 100%; margin-top: 1rem;">Log In</button>
@@ -254,30 +475,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         </div>
     </div>
 
-    <div class="modal-overlay" id="registerModal" aria-hidden="true" >
+    <!-- GOOGLE REGISTRATION CONFIRMATION MODAL -->
+    <div class="modal-overlay" id="googleConfirmModal" aria-hidden="true">
         <div class="modal">
+            <div class="modal__header">
+                <h3>Account Not Found</h3>
+                <button class="modal__close" data-close="googleConfirmModal">&times;</button>
+            </div>
+            <div class="modal__body">
+                <?php if (isset($_SESSION['pending_google_user'])): ?>
+                    <div class="alert alert--info">
+                        <strong>No account exists for:</strong><br>
+                        <?= htmlspecialchars($_SESSION['pending_google_user']['email']) ?> (<?= htmlspecialchars($_SESSION['pending_google_user']['name']) ?>)
+                    </div>
 
+                    <p style="font-size: 0.9rem; color: var(--text-body); margin-bottom: 1.25rem;">
+                        Would you like to create a new patient account using this Google profile?
+                    </p>
 
+                    <form action="index.php" method="POST">
+                        <input type="hidden" name="action" value="confirm_google_register">
+
+                        <div class="form-group" style="margin-bottom: 1.25rem;">
+                            <label for="gPhone">Phone Number (Optional)</label>
+                            <input type="tel" name="phoneNumber" id="gPhone" placeholder="e.g. +1 555-019-2834">
+                        </div>
+
+                        <div style="display:flex; gap:0.75rem;">
+                            <button type="submit" class="btn btn--primary" style="flex:1;">Yes, Register with Google</button>
+                            <button type="button" class="btn btn--outline" data-close="googleConfirmModal">Cancel</button>
+                        </div>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- REGISTER MODAL -->
+    <div class="modal-overlay" id="registerModal" aria-hidden="true">
+        <div class="modal">
             <div class="modal__header">
                 <h3>Create an Account</h3>
                 <button class="modal__close" data-close="registerModal">&times;</button>
             </div>
             
             <div class="modal__body">
-
                 <?php if (!empty($auth_error) && $open_modal_on_load === 'registerModal'): ?>
                     <div class="alert alert--error"><?= htmlspecialchars($auth_error) ?></div>
                 <?php endif; ?>
 
-                <button type="button" class="btn btn--google">
-                    <svg width="18" height="18" viewBox="0 0 18 18">
-                        <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.616z"/>
-                        <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
-                        <path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707 0-.59.102-1.167.282-1.707V4.961H.957C.347 6.175 0 7.55 0 9s.347 2.825.957 4.039l3.007-2.332z"/>
-                        <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/>
-                    </svg>
-                    Sign in with Google
-                </button>
+                <div class="google-btn-container" onclick="setGoogleSource('register')">
+                    <div id="googleSignInButtonRegister"></div>
+                </div>
 
                 <div class="divider">or continue with credentials</div>
 
@@ -291,13 +540,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
                     <div class="form-group">
                         <label for="identifier">Email or Username</label>
-                        <input 
-                            type="text" 
-                            id="identifier" 
-                            name="identifier" 
-                            placeholder="e.g. sarah.j@example.com or sarah_jenkins" 
-                            required
-                        >
+                        <input type="text" id="identifier" name="identifier" placeholder="e.g. sarah.j@example.com" required>
                     </div>
 
                     <div class="form-group">
@@ -330,33 +573,80 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         </div>
     </div>
 
+    <!-- ====================================================================
+         UPDATED MODAL: DOCTOR AVAILABILITY SCHEDULE & CLINIC OPERATING HOURS
+         ==================================================================== -->
     <div class="modal-overlay" id="scheduleModal" aria-hidden="true">
         <div class="modal modal--wide">
             <div class="modal__header">
-                <h3>Appointment Calendar</h3>
+                <h3>Doctor Availability & Clinic Hours</h3>
                 <button class="modal__close" data-close="scheduleModal">&times;</button>
             </div>
             <div class="modal__body">
-                <div class="calendar-layout">
-                    <div>
-                        <div class="calendar-header">
-                            <h4 id="calendarMonthYear">October 2025</h4>
-                            <div style="display: flex; gap: 0.5rem;">
-                                <button class="calendar-nav-btn" id="prevMonthBtn">&lt;</button>
-                                <button class="calendar-nav-btn" id="nextMonthBtn">&gt;</button>
-                            </div>
-                        </div>
-                        <div class="calendar-weekdays">
-                            <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
-                        </div>
-                        <div class="calendar-days" id="calendarDays"></div>
+
+                <!-- 1. General Clinic Operating Hours -->
+                <div class="clinic-hours-banner">
+                    <div class="clinic-hours-item">
+                        <h5>Outpatient Clinic</h5>
+                        <p>Mon – Sat: 08:00 AM – 06:00 PM</p>
                     </div>
-                    <div class="calendar-agenda">
-                        <h5>Daily Consultations</h5>
-                        <p class="agenda-date" id="selectedDateText">Select a day</p>
-                        <div class="agenda-list" id="agendaList"></div>
+                    <div class="clinic-hours-item">
+                        <h5>Diagnostics / Lab</h5>
+                        <p>Mon – Sat: 06:30 AM – 07:00 PM</p>
+                    </div>
+                    <div class="clinic-hours-item">
+                        <h5>Emergency & Triage</h5>
+                        <p style="color: #dc2626;">24 Hours / 7 Days a Week</p>
                     </div>
                 </div>
+
+                <!-- 2. Registered Doctors Availability Directory -->
+                <h4 style="margin-bottom: 0.75rem; font-size: 0.95rem; color: var(--text-dark);">
+                    Specialist Consultation Availability (By Department)
+                </h4>
+
+                <div class="doctor-schedule-list">
+                    <?php if (count($publicDoctors) > 0): ?>
+                        <?php foreach ($publicDoctors as $doc): ?>
+                            <?php $shift = getDoctorShift($doc['department']); ?>
+                            <div class="doctor-schedule-item">
+                                <div class="doc-info">
+                                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                                        <span class="pill pill--ok" style="font-size: 0.75rem;">
+                                            <?= htmlspecialchars($doc['department']) ?>
+                                        </span>
+                                        <span style="font-size: 0.75rem; color: var(--text-muted);">&#128205; <?= $shift['room'] ?></span>
+                                    </div>
+                                    <h4><?= htmlspecialchars($doc['full_name']) ?></h4>
+                                    <p>Contact: <?= htmlspecialchars($doc['phone_number']) ?></p>
+                                </div>
+
+                                <div class="doc-timing">
+                                    <strong><?= $shift['days'] ?></strong>
+                                    <small><?= $shift['hours'] ?></small>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <div style="text-align: center; color: var(--text-muted); padding: 2rem 0;">
+                            No doctors currently registered in the database.
+                        </div>
+                    <?php endif; ?>
+                </div>
+
+                <!-- Call to action button -->
+                <div style="margin-top: 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0;">
+                        Ready to consult? Register or log in to secure your slot.
+                    </p>
+                    <div style="display: flex; gap: 0.75rem;">
+                        <button type="button" class="btn btn--primary" onclick="closeModal('scheduleModal'); openModal('registerModal');">
+                            Book an Appointment
+                        </button>
+                        <button type="button" class="btn btn--outline" data-close="scheduleModal">Close</button>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
@@ -366,6 +656,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     </footer>
 
     <script>
+        let currentAuthSource = 'login';
+        function setGoogleSource(source) {
+            currentAuthSource = source;
+            document.getElementById('googleAuthSource').value = source;
+        }
+
+        function handleGoogleCredentialResponse(response) {
+            document.getElementById('googleCredentialInput').value = response.credential;
+            document.getElementById('googleAuthForm').submit();
+        }
+
+        window.onload = function () {
+            if (typeof google !== 'undefined') {
+                google.accounts.id.initialize({
+                    client_id: "<?= $google_client_id ?>",
+                    callback: handleGoogleCredentialResponse
+                });
+
+                google.accounts.id.renderButton(
+                    document.getElementById("googleSignInButtonLogin"),
+                    { theme: "outline", size: "large", width: "320", text: "continue_with" }
+                );
+
+                google.accounts.id.renderButton(
+                    document.getElementById("googleSignInButtonRegister"),
+                    { theme: "outline", size: "large", width: "320", text: "signup_with" }
+                );
+            }
+        };
+
         function openModal(id) {
             const modal = document.getElementById(id);
             if (modal) {
@@ -388,10 +708,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         if (loginBtn) loginBtn.addEventListener('click', () => openModal('loginModal'));
 
         document.getElementById('openRegisterModal').addEventListener('click', () => openModal('registerModal'));
-        document.getElementById('openScheduleModal').addEventListener('click', () => {
-            openModal('scheduleModal');
-            renderCalendar();
-        });
+        document.getElementById('openScheduleModal').addEventListener('click', () => openModal('scheduleModal'));
 
         document.getElementById('switchToRegister').addEventListener('click', (e) => {
             e.preventDefault();
@@ -418,31 +735,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         <?php if (!empty($open_modal_on_load)): ?>
             openModal('<?= $open_modal_on_load ?>');
         <?php endif; ?>
-
-        let currentDate = new Date();
-        const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-
-        function renderCalendar() {
-            const year = currentDate.getFullYear();
-            const month = currentDate.getMonth();
-            document.getElementById('calendarMonthYear').innerText = `${monthNames[month]} ${year}`;
-            const firstDay = new Date(year, month, 1).getDay();
-            const lastDay = new Date(year, month + 1, 0).getDate();
-            const calendarDays = document.getElementById('calendarDays');
-            calendarDays.innerHTML = '';
-
-            for (let i = 0; i < firstDay; i++) {
-                calendarDays.appendChild(Object.assign(document.createElement('div'), {className: 'calendar-day empty'}));
-            }
-
-            for (let d = 1; d <= lastDay; d++) {
-                const el = Object.assign(document.createElement('div'), {className: 'calendar-day', innerText: d});
-                calendarDays.appendChild(el);
-            }
-        }
-
-        document.getElementById('prevMonthBtn').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() - 1); renderCalendar(); });
-        document.getElementById('nextMonthBtn').addEventListener('click', () => { currentDate.setMonth(currentDate.getMonth() + 1); renderCalendar(); });
     </script>
 </body>
 </html>

@@ -1,8 +1,6 @@
-/* ==========================================
-   1. DESIGN TOKENS
-   ========================================== */
+
 :root {
-  --primary: #0284c7;        /* Medical Sky Blue */
+  --primary: #0284c7;       
   --primary-dark: #0369a1;
   --primary-light: #e0f2fe;
 
@@ -28,9 +26,7 @@
   --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* ==========================================
-   2. GLOBAL RESET & BASE
-   ========================================== */
+
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -47,9 +43,7 @@ body {
   flex-direction: column;
 }
 
-/* ==========================================
-   3. NAVBAR
-   ========================================== */
+
 .navbar {
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-subtle);
@@ -114,7 +108,7 @@ body {
   color: var(--text-muted);
 }
 
-/* Button Components */
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -150,9 +144,7 @@ body {
   color: var(--text-dark);
 }
 
-/* ==========================================
-   4. DASHBOARD & 4-CARD GRID
-   ========================================== */
+
 .dashboard {
   flex: 1;
   max-width: 1100px;
@@ -210,7 +202,7 @@ body {
   gap: 1.5rem;
 }
 
-/* Cards */
+
 .card {
   background: var(--bg-surface);
   border-radius: var(--radius-lg);
@@ -274,7 +266,7 @@ body {
   margin-bottom: 1.25rem;
 }
 
-/* Status Pills */
+
 .pill-group {
   display: flex;
   flex-wrap: wrap;
@@ -324,9 +316,7 @@ body {
   gap: 0.55rem;
 }
 
-/* ==========================================
-   5. MODAL SYSTEM
-   ========================================== */
+
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -408,9 +398,7 @@ body {
   margin-top: 1.5rem;
 }
 
-/* ==========================================
-   6. CLINICAL TOOLS (QUEUE, FORMS, EMR)
-   ========================================== */
+
 .list-container {
   display: flex;
   flex-direction: column;
@@ -445,7 +433,7 @@ body {
   color: var(--text-muted);
 }
 
-/* EMR Search Input */
+
 .search-box {
   display: flex;
   gap: 0.5rem;
@@ -480,7 +468,7 @@ body {
   margin-bottom: 0.35rem;
 }
 
-/* Doctor Form Styling */
+
 .doctor-form {
   display: flex;
   flex-direction: column;
@@ -512,7 +500,7 @@ body {
   background-color: #ffffff;
 }
 
-/* Availability List */
+
 .availability-list {
   display: flex;
   flex-direction: column;
@@ -539,9 +527,7 @@ body {
   color: var(--text-muted);
 }
 
-/* ==========================================
-   7. FOOTER
-   ========================================== */
+
 .footer {
   background: var(--bg-surface);
   border-top: 1px solid var(--border-subtle);
