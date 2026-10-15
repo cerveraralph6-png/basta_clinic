@@ -1,0 +1,11 @@
+========================================
+       HOSPLINIC E-PRESCRIPTION         
+========================================
+Date: 2026-10-15 08:36:13
+Booking Code: HSP-2610-4329
+Attending Physician: Ralph Cervera
+
+Medication: paracetamol
+Instructions:
+10x a day
+========================================

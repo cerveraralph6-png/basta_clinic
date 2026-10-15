@@ -682,5 +682,7 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
             }
         });
     </script>
+
+    <script src="../scripts/session_timeout.js"></script>
 </body>
 </html>

@@ -1376,5 +1376,7 @@ $minDateOnly = $minDateObj->format('Y-m-d');
             openModal('<?= $open_modal ?>');
         <?php endif; ?>
     </script>
+
+    <script src="../scripts/session_timeout.js"></script>
 </body>
 </html>

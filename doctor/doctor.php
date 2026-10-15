@@ -21,6 +21,8 @@ $unavailable_count = intval($docUser['unavailable_count'] ?? 0);
 
 $upload_msg = '';
 $upload_error = '';
+$rx_msg = '';
+$rx_error = '';
 
 
 
@@ -72,7 +74,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $dept = $appointment['department'];
             $code = $appointment['booking_code'] ?? ('#' . $apt_id);
 
-            
             $newDocStmt = $pdo->prepare("
                 SELECT id, full_name FROM users 
                 WHERE role = 'doctor' AND department = :dept AND id != :cur_id 
@@ -81,7 +82,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $newDocStmt->execute([':dept' => $dept, ':cur_id' => $doctor_id]);
             $newDoc = $newDocStmt->fetch(PDO::FETCH_ASSOC);
 
-            
             if (!$newDoc) {
                 $anyDocStmt = $pdo->prepare("SELECT id, full_name FROM users WHERE role = 'doctor' AND id != :cur_id LIMIT 1");
                 $anyDocStmt->execute([':cur_id' => $doctor_id]);
@@ -91,7 +91,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $new_doctor_id = $newDoc ? $newDoc['id'] : null;
             $new_doctor_name = $newDoc ? $newDoc['full_name'] : "On-Duty Clinical Staff ($dept)";
 
-            
             $reassignStmt = $pdo->prepare("
                 UPDATE appointments 
                 SET doctor_id = :nid, doctor_name = :nname, status = 'Pending' 
@@ -103,12 +102,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 ':id'    => $apt_id
             ]);
 
-            
             $incStmt = $pdo->prepare("UPDATE users SET unavailable_count = unavailable_count + 1 WHERE id = :id");
             $incStmt->execute([':id' => $doctor_id]);
-            $unavailable_count++; 
+            $unavailable_count++;
 
-            
             $logStmt = $pdo->prepare("
                 INSERT INTO doctor_unavailability_logs (doctor_id, appointment_id, reassigned_doctor_id, reason)
                 VALUES (:did, :aid, :rid, :reason)
@@ -120,16 +117,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 ':reason' => $unavail_reason
             ]);
 
-            
             $adminAlertStmt = $pdo->prepare("
                 INSERT INTO notifications (user_id, title, message, type)
                 SELECT id, 'Doctor Unavailability Alert', :msg, 'comment'
                 FROM users WHERE role = 'admin'
             ");
-            $adminAlertMsg = "Incident Alert: $doctor_name declared unavailable for booking [$code]. Reassigned to $new_doctor_name. (Total Doctor Strikes: $unavailable_count). Reason: $unavail_reason";
+            $adminAlertMsg = "Incident Alert: $doctor_name declared unavailable for booking [$code]. Reassigned to $new_doctor_name. (Total Strikes: $unavailable_count). Reason: $unavail_reason";
             $adminAlertStmt->execute([':msg' => $adminAlertMsg]);
 
-            
             $patNotif = $pdo->prepare("
                 INSERT INTO notifications (user_id, title, message, type)
                 VALUES (:pid, 'Physician Reassigned', :msg, 'reminder')
@@ -139,20 +134,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 ':msg' => "Dr. $doctor_name was unavailable for booking [$code]. You have been successfully reassigned to $new_doctor_name."
             ]);
 
-            
-            if ($new_doctor_id) {
-                $newDocNotif = $pdo->prepare("
-                    INSERT INTO notifications (user_id, title, message, type)
-                    VALUES (:did, 'Reassigned Patient Received', :msg, 'reminder')
-                ");
-                $newDocNotif->execute([
-                    ':did' => $new_doctor_id,
-                    ':msg' => "Patient consultation [$code] was transferred to your queue from $doctor_name."
-                ]);
-            }
-
             $pdo->commit();
-            $upload_msg = "Patient [$code] was passed to $new_doctor_name. Your unavailability incident was recorded (Total: $unavailable_count).";
+            $upload_msg = "Patient [$code] was passed to $new_doctor_name. Incident recorded.";
         } catch (PDOException $e) {
             $pdo->rollBack();
             $upload_error = "Error transferring patient: " . $e->getMessage();
@@ -164,13 +147,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'upload_record') {
-    $patient_id      = intval($_POST['patient_id'] ?? 0);
+    $booking_code    = trim($_POST['booking_code'] ?? '');
     $title           = trim($_POST['title'] ?? '');
     $diagnosis_notes = trim($_POST['diagnosis_notes'] ?? '');
 
-    if ($patient_id <= 0 || empty($title) || !isset($_FILES['medical_file']) || $_FILES['medical_file']['error'] !== UPLOAD_ERR_OK) {
-        $upload_error = "Please fill in all fields and select a valid document to upload.";
+    
+    $aptLookup = $pdo->prepare("SELECT user_id, id FROM appointments WHERE booking_code = :bcode LIMIT 1");
+    $aptLookup->execute([':bcode' => $booking_code]);
+    $aptFound = $aptLookup->fetch(PDO::FETCH_ASSOC);
+
+    if (!$aptFound) {
+        $upload_error = "Invalid or non-existent Booking Reference Code ($booking_code). Please check and re-enter.";
+    } elseif (empty($title) || !isset($_FILES['medical_file']) || $_FILES['medical_file']['error'] !== UPLOAD_ERR_OK) {
+        $upload_error = "Please provide a document title and attach a valid file.";
     } else {
+        $patient_id = $aptFound['user_id'];
+        $appointment_id = $aptFound['id'];
+
         $file = $_FILES['medical_file'];
         $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
         $allowed = ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'];
@@ -209,34 +202,115 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 ");
                 $notifStmt->execute([
                     ':pid' => $patient_id,
-                    ':msg' => "$doctor_name uploaded a new record: $title. You can now download it under Diagnosis & Records."
+                    ':msg' => "$doctor_name uploaded a new record for [$booking_code]: $title. Download it under Diagnosis & Records."
                 ]);
 
-                $upload_msg = "Document '$title' uploaded successfully and sent to patient!";
+                $upload_msg = "Document '$title' successfully uploaded and sent to patient ($booking_code)!";
             } else {
-                $upload_error = "Failed to save file to server. Check upload folder permissions.";
+                $upload_error = "Failed to save file to server.";
             }
         }
     }
 }
 
 
-$patientListStmt = $pdo->query("SELECT id, full_name, identifier FROM users WHERE role = 'patient' ORDER BY full_name ASC");
-$patients = $patientListStmt->fetchAll(PDO::FETCH_ASSOC);
 
 
-$docNotifStmt = $pdo->prepare("
-    SELECT * FROM notifications 
-    WHERE user_id = :doctor_id 
-    ORDER BY created_at DESC LIMIT 6
-");
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'issue_prescription') {
+    $booking_code        = trim($_POST['rx_booking_code'] ?? '');
+    $medication_name     = trim($_POST['medication_name'] ?? '');
+    $dosage_instructions = trim($_POST['dosage_instructions'] ?? '');
+
+    $aptLookup = $pdo->prepare("SELECT user_id, id FROM appointments WHERE booking_code = :bcode LIMIT 1");
+    $aptLookup->execute([':bcode' => $booking_code]);
+    $aptFound = $aptLookup->fetch(PDO::FETCH_ASSOC);
+
+    if (!$aptFound) {
+        $rx_error = "Invalid Booking Reference Code ($booking_code).";
+    } elseif (empty($medication_name) || empty($dosage_instructions)) {
+        $rx_error = "Medication name and dosage instructions are required.";
+    } else {
+        $patient_id = $aptFound['user_id'];
+        $appointment_id = $aptFound['id'];
+
+        try {
+            $pdo->beginTransaction();
+
+            
+            $rxStmt = $pdo->prepare("
+                INSERT INTO prescriptions (patient_id, doctor_id, appointment_id, medication_name, dosage_instructions)
+                VALUES (:pid, :did, :aid, :mname, :instructions)
+            ");
+            $rxStmt->execute([
+                ':pid'          => $patient_id,
+                ':did'          => $doctor_id,
+                ':aid'          => $appointment_id,
+                ':mname'        => $medication_name,
+                ':instructions' => $dosage_instructions
+            ]);
+
+            
+            $rxTitle = "e-Prescription: " . $medication_name;
+            $rxNotes = "Prescribed by: $doctor_name\nMedication: $medication_name\nDosage & Instructions:\n$dosage_instructions";
+            
+            
+            $uploadDir = '../uploads/';
+            if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
+            $fileName = 'prescription_' . uniqid() . '.txt';
+            $filePath = $uploadDir . $fileName;
+            $dbFilePath = 'uploads/' . $fileName;
+            
+            $fileContent = "========================================\n";
+            $fileContent .= "       HOSPLINIC E-PRESCRIPTION         \n";
+            $fileContent .= "========================================\n";
+            $fileContent .= "Date: " . date('Y-m-d H:i:s') . "\n";
+            $fileContent .= "Booking Code: $booking_code\n";
+            $fileContent .= "Attending Physician: $doctor_name\n\n";
+            $fileContent .= "Medication: $medication_name\n";
+            $fileContent .= "Instructions:\n$dosage_instructions\n";
+            $fileContent .= "========================================\n";
+            
+            file_put_contents($filePath, $fileContent);
+            $fileSize = round(filesize($filePath) / 1024, 1) . ' KB';
+
+            $recStmt = $pdo->prepare("
+                INSERT INTO medical_records (patient_id, doctor_id, title, diagnosis_notes, file_name, file_path, file_size)
+                VALUES (:pid, :did, :title, :notes, :fname, :fpath, :fsize)
+            ");
+            $recStmt->execute([
+                ':pid'   => $patient_id,
+                ':did'   => $doctor_id,
+                ':title' => $rxTitle,
+                ':notes' => $rxNotes,
+                ':fname' => $medication_name . '_Rx.txt',
+                ':fpath' => $dbFilePath,
+                ':fsize' => $fileSize
+            ]);
+
+            
+            $notif = $pdo->prepare("
+                INSERT INTO notifications (user_id, title, message, type)
+                VALUES (:pid, 'New e-Prescription Issued', :msg, 'confirmed')
+            ");
+            $notif->execute([
+                ':pid' => $patient_id,
+                ':msg' => "Dr. $doctor_name issued an e-Prescription for [$booking_code]: $medication_name. View and download it under Diagnosis & Records."
+            ]);
+
+            $pdo->commit();
+            $rx_msg = "e-Prescription for '$medication_name' issued and automatically sent to patient ($booking_code)!";
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            $rx_error = "Database Error: " . $e->getMessage();
+        }
+    }
+}
+
+
+$docNotifStmt = $pdo->prepare("SELECT * FROM notifications WHERE user_id = :doctor_id ORDER BY created_at DESC LIMIT 6");
 $docNotifStmt->execute([':doctor_id' => $doctor_id]);
 $doctorNotifications = $docNotifStmt->fetchAll(PDO::FETCH_ASSOC);
-
-$unreadDocCount = 0;
-foreach ($doctorNotifications as $dn) {
-    if ($dn['is_read'] == 0) $unreadDocCount++;
-}
+$unreadDocCount = count(array_filter($doctorNotifications, fn($dn) => $dn['is_read'] == 0));
 
 
 $queueStmt = $pdo->prepare("
@@ -248,7 +322,6 @@ $queueStmt = $pdo->prepare("
 ");
 $queueStmt->execute([':doctor_id' => $doctor_id]);
 $doctorQueue = $queueStmt->fetchAll(PDO::FETCH_ASSOC);
-
 
 $nextPatient = null;
 $now = date('Y-m-d H:i:s');
@@ -268,8 +341,8 @@ foreach ($doctorQueue as $q) {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="../styles/doctor.css">
 
+    <link rel="stylesheet" href="../styles/doctor.css">
 
     <style>
         .alert { padding: 0.75rem 1rem; border-radius: var(--radius-md, 8px); font-size: 0.875rem; margin-bottom: 1.5rem; }
@@ -290,9 +363,7 @@ foreach ($doctorQueue as $q) {
         }
 
         .pill--pending { background-color: #fef3c7; color: #b45309; }
-        .pill--danger { background-color: #fee2e2; color: #dc2626; }
 
-       
         .notif-wrapper { position: relative; display: inline-block; }
         .notif-btn {
             background: #ffffff;
@@ -379,7 +450,6 @@ foreach ($doctorQueue as $q) {
         
         <div class="navbar__actions" style="display: flex; align-items: center; gap: 1.25rem;">
             
-            <!-- DOCTOR NOTIFICATION BELL -->
             <div class="notif-wrapper">
                 <button type="button" class="notif-btn" id="docNotifBtn" aria-label="Notifications">
                     <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -401,15 +471,9 @@ foreach ($doctorQueue as $q) {
                             <?php foreach ($doctorNotifications as $dNotif): ?>
                                 <div class="notif-item <?= $dNotif['is_read'] == 0 ? 'unread' : '' ?>">
                                     <div class="notif-icon <?= strpos($dNotif['title'], 'Cancel') !== false ? 'notif-icon--cancel' : 'notif-icon--info' ?>">
-                                        <?php if (strpos($dNotif['title'], 'Cancel') !== false): ?>
-                                            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                            </svg>
-                                        <?php else: ?>
-                                            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                            </svg>
-                                        <?php endif; ?>
+                                        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
                                     </div>
                                     <div class="notif-content">
                                         <h5><?= htmlspecialchars($dNotif['title']) ?></h5>
@@ -428,7 +492,7 @@ foreach ($doctorQueue as $q) {
             </div>
 
             <div class="doctor-profile">
-                <strong><?= $doctor_name ?></strong>
+                <strong>Dr. <?= $doctor_name ?></strong>
                 <small><?= $doctor_dept ?> &bull; Active Duty</small>
             </div>
             <a href="../logout.php" class="btn btn--outline">Sign Out</a>
@@ -438,7 +502,7 @@ foreach ($doctorQueue as $q) {
     <main class="dashboard">
         <div class="dashboard__banner">
             <div>
-                <h2>Good Day, <?= $doctor_name ?></h2>
+                <h2>Good Day, Dr. <?= $doctor_name ?></h2>
                 <p>You have <strong><?= count($doctorQueue) ?> consultation(s)</strong> assigned to your clinic schedule.</p>
             </div>
             <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
@@ -451,7 +515,6 @@ foreach ($doctorQueue as $q) {
                     <?php endif; ?>
                 </div>
 
-                <!-- UNAVAILABILITY STRIKE COUNTER BADGE -->
                 <div style="background: <?= $unavailable_count > 0 ? '#fee2e2' : '#f1f5f9' ?>; border: 1px solid <?= $unavailable_count > 0 ? '#fca5a5' : '#cbd5e1' ?>; padding: 0.55rem 0.85rem; border-radius: var(--radius-md); font-size: 0.8rem; color: <?= $unavailable_count > 0 ? '#991b1b' : '#475569' ?>;">
                     &#9888; <strong>Unavailability Counter:</strong> <?= $unavailable_count ?> Incident(s)
                 </div>
@@ -463,6 +526,13 @@ foreach ($doctorQueue as $q) {
         <?php endif; ?>
         <?php if (!empty($upload_error)): ?>
             <div class="alert alert--error"><?= htmlspecialchars($upload_error) ?></div>
+        <?php endif; ?>
+
+        <?php if (!empty($rx_msg)): ?>
+            <div class="alert alert--success"><?= htmlspecialchars($rx_msg) ?></div>
+        <?php endif; ?>
+        <?php if (!empty($rx_error)): ?>
+            <div class="alert alert--error"><?= htmlspecialchars($rx_error) ?></div>
         <?php endif; ?>
 
         <div class="dashboard__grid">
@@ -494,7 +564,7 @@ foreach ($doctorQueue as $q) {
                         </svg>
                     </div>
                     <h3 class="card__title">Upload Diagnosis / Lab</h3>
-                    <p class="card__desc">Upload diagnostic lab results, imaging scans, and formal diagnosis letters for patient download.</p>
+                    <p class="card__desc">Upload diagnostic lab results, imaging scans, and formal diagnosis letters using Booking Codes.</p>
                     
                     <div class="pill-group">
                         <span class="pill pill--ok">+ Attach Patient Files</span>
@@ -503,7 +573,7 @@ foreach ($doctorQueue as $q) {
                 <span class="card__link">Upload Medical Record &rarr;</span>
             </div>
 
-            <!-- Card 3: e-Prescriptions -->
+            <!-- Card 3: e-Prescriptions (CONNECTED) -->
             <div class="card" id="openRxModal" role="button" tabindex="0">
                 <div>
                     <div class="card__icon card__icon--purple">
@@ -512,7 +582,11 @@ foreach ($doctorQueue as $q) {
                         </svg>
                     </div>
                     <h3 class="card__title">e-Prescriptions</h3>
-                    <p class="card__desc">Issue digital prescriptions directly to the hospital pharmacy.</p>
+                    <p class="card__desc">Issue digital prescriptions via Booking Code. Automatically sent to the patient's record.</p>
+                    
+                    <div class="pill-group">
+                        <span class="pill pill--ok">Auto-Sends to Patient</span>
+                    </div>
                 </div>
                 <span class="card__link">Issue Prescription &rarr;</span>
             </div>
@@ -538,9 +612,7 @@ foreach ($doctorQueue as $q) {
         </div>
     </main>
 
-    <!-- ==========================================
-         MODAL 1: REAL PATIENT CONSULTATION QUEUE
-         ========================================== -->
+    <!-- MODAL 1: REAL PATIENT CONSULTATION QUEUE -->
     <div class="modal-overlay" id="queueModal" aria-hidden="true">
         <div class="modal modal--wide">
             <div class="modal__header">
@@ -580,7 +652,6 @@ foreach ($doctorQueue as $q) {
 
                                 <div style="display: flex; gap: 0.5rem; align-items: center;">
                                     <?php if ($queue['status'] === 'Pending'): ?>
-                                        <!-- 1. Approve Button -->
                                         <form action="doctor.php" method="POST" style="margin: 0;">
                                             <input type="hidden" name="action" value="confirm_appointment">
                                             <input type="hidden" name="appointment_id" value="<?= $queue['id'] ?>">
@@ -594,7 +665,6 @@ foreach ($doctorQueue as $q) {
                                         </span>
                                     <?php endif; ?>
 
-                                    <!-- 2. UNAVAILABLE / PASS BUTTON -->
                                     <button 
                                         type="button" 
                                         onclick="promptDoctorUnavailable(<?= $queue['id'] ?>, '<?= htmlspecialchars($queue['booking_code'] ?? '#'.$queue['id']) ?>', '<?= htmlspecialchars(addslashes($queue['patient_name'])) ?>')" 
@@ -620,50 +690,7 @@ foreach ($doctorQueue as $q) {
         </div>
     </div>
 
-    <!-- ==========================================
-         MODAL: DOCTOR UNAVAILABLE CONFIRMATION
-         ========================================== -->
-    <div class="modal-overlay" id="unavailModal" aria-hidden="true">
-        <div class="modal">
-            <div class="modal__header">
-                <h3>Doctor Unavailability & Patient Reassignment</h3>
-                <button class="modal__close" data-close="unavailModal">&times;</button>
-            </div>
-            <div class="modal__body">
-                <form action="doctor.php" method="POST" class="doctor-form">
-                    <input type="hidden" name="action" value="pass_patient">
-                    <input type="hidden" name="appointment_id" id="unavail_apt_id" value="">
-
-                    <div style="background: #fffbeb; border: 1px solid #fde68a; padding: 0.85rem; border-radius: var(--radius-md); font-size: 0.825rem; color: #92400e; margin-bottom: 1rem;">
-                        <strong>&#9888; Official Clinic Audit Notice:</strong>
-                        <p style="margin: 0.35rem 0 0 0;">
-                            Patient: <strong id="unavail_patient_name">Patient</strong> (<span class="booking-code-badge" id="unavail_booking_code">HSP-0000</span>)<br>
-                            Declaring unavailability will <strong>increment your strike counter</strong> and automatically <strong>dispatch an incident report to Clinic Administration</strong>.
-                        </p>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="unavail_reason">Reason for Unavailability (Mandatory for Audit)</label>
-                        <select name="unavail_reason" id="unavail_reason" required>
-                            <option value="Emergency Procedure / Surgery">Emergency Procedure / Surgery</option>
-                            <option value="Physician Medical Leave / Sickness">Physician Medical Leave / Sickness</option>
-                            <option value="Clinic Schedule Overrun">Clinic Schedule Overrun</option>
-                            <option value="Personal Emergency">Personal Emergency</option>
-                        </select>
-                    </div>
-
-                    <div class="modal-actions" style="margin-top: 1.5rem;">
-                        <button type="submit" class="btn btn--primary" style="background:#dc2626; flex:1;">
-                            Confirm & Pass Patient
-                        </button>
-                        <button type="button" class="btn btn--outline" data-close="unavailModal">Cancel</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
-    <!-- MODAL 2: UPLOAD DIAGNOSIS / MEDICAL RECORD -->
+    <!-- MODAL 2: UPLOAD DIAGNOSIS / MEDICAL RECORD (USING BOOKING CODE) -->
     <div class="modal-overlay" id="uploadModal" aria-hidden="true">
         <div class="modal">
             <div class="modal__header">
@@ -675,15 +702,9 @@ foreach ($doctorQueue as $q) {
                     <input type="hidden" name="action" value="upload_record">
 
                     <div class="form-group">
-                        <label for="patient_id">Select Patient</label>
-                        <select name="patient_id" id="patient_id" required>
-                            <option value="">-- Choose Patient --</option>
-                            <?php foreach ($patients as $p): ?>
-                                <option value="<?= $p['id'] ?>">
-                                    <?= htmlspecialchars($p['full_name']) ?> (<?= htmlspecialchars($p['identifier']) ?>)
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
+                        <label for="booking_code">Patient Booking Reference Code</label>
+                        <input type="text" name="booking_code" id="booking_code" placeholder="e.g. HSP-2610-7492" required>
+                        <span class="auto-hint">Enter the patient's official hospital booking reference code.</span>
                     </div>
 
                     <div class="form-group">
@@ -710,16 +731,38 @@ foreach ($doctorQueue as $q) {
         </div>
     </div>
 
-    <!-- MODAL 3: PRESCRIPTION -->
+    <!-- MODAL 3: E-PRESCRIPTIONS (CONNECTED & SENDS TO PATIENT) -->
     <div class="modal-overlay" id="rxModal" aria-hidden="true">
         <div class="modal">
             <div class="modal__header">
-                <h3>Issue Prescription</h3>
+                <h3>Issue e-Prescription</h3>
                 <button class="modal__close" data-close="rxModal">&times;</button>
             </div>
             <div class="modal__body">
-                <p style="text-align:center; color: var(--text-muted); padding: 1.5rem 0;">Hospital Pharmacy interface active.</p>
-                <div class="modal-actions"><button class="btn btn--outline" data-close="rxModal">Close</button></div>
+                <form action="doctor.php" method="POST" class="doctor-form">
+                    <input type="hidden" name="action" value="issue_prescription">
+
+                    <div class="form-group">
+                        <label for="rx_booking_code">Patient Booking Reference Code</label>
+                        <input type="text" name="rx_booking_code" id="rx_booking_code" placeholder="e.g. HSP-2610-7492" required>
+                        <span class="auto-hint">Prescriptions are automatically filed under the patient's digital record.</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="medication_name">Medication Name & Strength</label>
+                        <input type="text" name="medication_name" id="medication_name" placeholder="e.g. Amoxicillin 500mg capsules" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="dosage_instructions">Dosage & Frequency Instructions</label>
+                        <textarea name="dosage_instructions" id="dosage_instructions" rows="3" placeholder="e.g. Take 1 capsule 3 times a day after meals for 7 days." required></textarea>
+                    </div>
+
+                    <div class="modal-actions">
+                        <button type="submit" class="btn btn--primary" style="flex:1;">Issue & Send to Patient</button>
+                        <button type="button" class="btn btn--outline" data-close="rxModal">Cancel</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
@@ -738,11 +781,49 @@ foreach ($doctorQueue as $q) {
         </div>
     </div>
 
+    <!-- MODAL: DOCTOR UNAVAILABLE -->
+    <div class="modal-overlay" id="unavailModal" aria-hidden="true">
+        <div class="modal">
+            <div class="modal__header">
+                <h3>Doctor Unavailability & Patient Reassignment</h3>
+                <button class="modal__close" data-close="unavailModal">&times;</button>
+            </div>
+            <div class="modal__body">
+                <form action="doctor.php" method="POST" class="doctor-form">
+                    <input type="hidden" name="action" value="pass_patient">
+                    <input type="hidden" name="appointment_id" id="unavail_apt_id" value="">
+
+                    <div style="background: #fffbeb; border: 1px solid #fde68a; padding: 0.85rem; border-radius: var(--radius-md); font-size: 0.825rem; color: #92400e; margin-bottom: 1rem;">
+                        <strong>&#9888; Official Clinic Audit Notice:</strong>
+                        <p style="margin: 0.35rem 0 0 0;">
+                            Patient: <strong id="unavail_patient_name">Patient</strong> (<span class="booking-code-badge" id="unavail_booking_code">HSP-0000</span>)<br>
+                            Declaring unavailability will <strong>increment your strike counter</strong> and notify Administration.
+                        </p>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="unavail_reason">Reason for Unavailability</label>
+                        <select name="unavail_reason" id="unavail_reason" required>
+                            <option value="Emergency Procedure / Surgery">Emergency Procedure / Surgery</option>
+                            <option value="Physician Medical Leave / Sickness">Physician Medical Leave / Sickness</option>
+                            <option value="Clinic Schedule Overrun">Clinic Schedule Overrun</option>
+                            <option value="Personal Emergency">Personal Emergency</option>
+                        </select>
+                    </div>
+
+                    <div class="modal-actions" style="margin-top: 1.5rem;">
+                        <button type="submit" class="btn btn--primary" style="background:#dc2626; flex:1;">Confirm & Pass Patient</button>
+                        <button type="button" class="btn btn--outline" data-close="unavailModal">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <footer class="footer">
         <p>&copy; <?= date('Y') ?> Hosplinic Management System &bull; Physician Portal</p>
     </footer>
 
-    <!-- Interactive Scripts -->
     <script>
         const docNotifBtn = document.getElementById('docNotifBtn');
         const docNotifDropdown = document.getElementById('docNotifDropdown');
@@ -760,7 +841,6 @@ foreach ($doctorQueue as $q) {
             });
         }
 
-        
         function promptDoctorUnavailable(aptId, bookingCode, patientName) {
             document.getElementById('unavail_apt_id').value = aptId;
             document.getElementById('unavail_booking_code').innerText = bookingCode;
