@@ -8,6 +8,17 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
+// ==========================================
+// AJAX API: MARK NOTIFICATIONS AS READ
+// ==========================================
+if (isset($_GET['mark_notifs_read'])) {
+    header('Content-Type: application/json');
+    $markStmt = $pdo->prepare("UPDATE notifications SET is_read = 1 WHERE user_id = :uid AND is_read = 0");
+    $markStmt->execute([':uid' => $user_id]);
+    echo json_encode(['success' => true]);
+    exit;
+}
+
 $user_id = $_SESSION['user_id'];
 $patient_full_name = htmlspecialchars($_SESSION['user_name'] ?? 'Patient');
 $patient_first_name = explode(' ', trim($patient_full_name))[0];
@@ -577,6 +588,7 @@ $minDateOnly = $minDateObj->format('Y-m-d');
         .notif-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; }
         .notif-item { padding: 0.85rem 1.1rem; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 0.75rem; text-decoration: none; }
         .notif-item.unread { background-color: #f0f9ff; }
+        /* Dynamic Notification Alert Icons */
         .notif-icon {
             width: 32px;
             height: 32px;
@@ -585,8 +597,26 @@ $minDateOnly = $minDateObj->format('Y-m-d');
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
-            background: #dcfce7;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+        /* Approved / Confirmed (Green Check) */
+        .notif-icon--confirmed {
+            background-color: #dcfce7;
             color: #15803d;
+            border: 1px solid #86efac;
+        }
+        /* Cancelled / Rejected (Red X) */
+        .notif-icon--cancelled {
+            background-color: #fee2e2;
+            color: #dc2626;
+            border: 1px solid #fca5a5;
+        }
+        /* Notice / Reminder / Info (Blue 'i') */
+        .notif-icon--info {
+            background-color: #e0f2fe;
+            color: #0284c7;
+            border: 1px solid #7dd3fc;
         }
         .notif-content h5 { font-size: 0.85rem; color: var(--text-dark); margin-bottom: 0.2rem; font-weight: 600; }
         .notif-content p { font-size: 0.775rem; color: var(--text-body); line-height: 1.4; margin-bottom: 0.25rem; }
@@ -718,24 +748,53 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                     </svg>
                     <?php if ($unreadCount > 0): ?>
-                        <span class="notif-badge"><?= $unreadCount ?></span>
+                        <span class="notif-badge" id="notifBadge"><?= $unreadCount ?></span>
                     <?php endif; ?>
                 </button>
 
                 <div class="notif-dropdown" id="notifDropdown">
                     <div class="notif-header">
                         <h4>Notifications</h4>
-                        <span style="font-size: 0.75rem; color: var(--primary); font-weight: 600;"><?= $unreadCount ?> new</span>
+                        <span style="font-size: 0.75rem; color: var(--primary); font-weight: 600;" id="notifSubheaderCount"><?= $unreadCount ?> new</span>
                     </div>
 
                     <div class="notif-list">
                         <?php if (count($notifications) > 0): ?>
-                            <?php foreach ($notifications as $notif): ?>
+                            <?php foreach ($notifications as $notif): 
+                                $title = strtolower($notif['title'] ?? '');
+                                $msg   = strtolower($notif['message'] ?? '');
+                                $type  = strtolower($notif['type'] ?? '');
+
+                                // Determine notification state
+                                if (strpos($title, 'cancel') !== false || strpos($msg, 'cancel') !== false || strpos($title, 'decline') !== false) {
+                                    $alertStyle = 'notif-icon--cancelled';
+                                    $iconType = 'cancelled';
+                                } elseif (strpos($title, 'confirm') !== false || strpos($title, 'approved') !== false || strpos($title, 'paid') !== false || $type === 'confirmed') {
+                                    $alertStyle = 'notif-icon--confirmed';
+                                    $iconType = 'confirmed';
+                                } else {
+                                    $alertStyle = 'notif-icon--info';
+                                    $iconType = 'info';
+                                }
+                            ?>
                                 <div class="notif-item <?= $notif['is_read'] == 0 ? 'unread' : '' ?>">
-                                    <div class="notif-icon">
-                                        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                                        </svg>
+                                    <div class="notif-icon <?= $alertStyle ?>">
+                                        <?php if ($iconType === 'confirmed'): ?>
+                                            <!-- Green Checkmark SVG -->
+                                            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
+                                            </svg>
+                                        <?php elseif ($iconType === 'cancelled'): ?>
+                                            <!-- Red X SVG -->
+                                            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        <?php else: ?>
+                                            <!-- Blue Information 'i' SVG -->
+                                            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                        <?php endif; ?>
                                     </div>
                                     <div class="notif-content">
                                         <h5><?= htmlspecialchars($notif['title']) ?></h5>
@@ -1235,11 +1294,30 @@ $minDateOnly = $minDateObj->format('Y-m-d');
 
         const notifBtn = document.getElementById('notifBtn');
         const notifDropdown = document.getElementById('notifDropdown');
+        const notifBadge = document.getElementById('notifBadge');
+        const notifSubheaderCount = document.getElementById('notifSubheaderCount');
 
         if (notifBtn && notifDropdown) {
             notifBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                notifDropdown.classList.toggle('active');
+                const isOpen = notifDropdown.classList.toggle('active');
+
+                // Once the user opens the dropdown, clear the badge and update the database
+                if (isOpen && notifBadge && notifBadge.style.display !== 'none') {
+                    // Instantly hide the red badge count
+                    notifBadge.style.display = 'none';
+                    if (notifSubheaderCount) {
+                        notifSubheaderCount.innerText = '0 new';
+                    }
+
+                    // Remove highlighted unread background on items
+                    document.querySelectorAll('.notif-item.unread').forEach(item => {
+                        item.classList.remove('unread');
+                    });
+
+                    // Mark all as read in the database silently
+                    fetch('patient.php?mark_notifs_read=1').catch(err => console.error(err));
+                }
             });
 
             document.addEventListener('click', (e) => {
