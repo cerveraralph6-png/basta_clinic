@@ -12,6 +12,9 @@ $admin_name = htmlspecialchars($_SESSION['user_name'] ?? 'Administrator');
 $staff_msg = '';
 $staff_error = '';
 
+// ==========================================
+// 1. HANDLE STAFF REGISTRATION
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'register_staff') {
     $fullName    = trim($_POST['fullName'] ?? '');
     $identifier  = trim($_POST['identifier'] ?? '');
@@ -30,7 +33,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     } elseif (strlen($password) < 6) {
         $staff_error = "Password must be at least 6 characters.";
     } else {
-
         $checkStmt = $pdo->prepare("SELECT id FROM users WHERE identifier = :identifier LIMIT 1");
         $checkStmt->execute([':identifier' => $identifier]);
 
@@ -65,26 +67,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// Handle Admin Confirming On-Site or Submitted Payment
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'verify_payment') {
+// Add this logic if you want an Admin to be able to Reset/Reject a payment
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'reject_payment') {
     $bill_id = intval($_POST['bill_id'] ?? 0);
-    $pdo->prepare("UPDATE billings SET payment_status = 'Paid' WHERE id = :id")->execute([':id' => $bill_id]);
-    $staff_msg = "Payment successfully verified and marked as Paid!";
+    // Reset back to Unpaid so the patient has to re-submit
+    $pdo->prepare("UPDATE billings SET payment_status = 'Unpaid', receipt_path = NULL WHERE id = :id")->execute([':id' => $bill_id]);
+    $staff_msg = "Payment rejected. Patient will be notified to re-submit.";
 }
 
-// Fetch pending payment verifications
+// ==========================================
+// 2. HANDLE ADMIN CONFIRMING PAYMENT
+// ==========================================
+// ==========================================
+// 2. HANDLE ADMIN CONFIRMING PAYMENT
+// ==========================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'verify_payment') {
+    $bill_id = intval($_POST['bill_id'] ?? 0);
+    
+    // Admin sets it to Paid
+    $payStmt = $pdo->prepare("UPDATE billings SET payment_status = 'Paid' WHERE id = :id");
+    $payStmt->execute([':id' => $bill_id]);
+
+    $bInfo = $pdo->prepare("SELECT user_id, invoice_number FROM billings WHERE id = :id");
+    $bInfo->execute([':id' => $bill_id]);
+    $billRow = $bInfo->fetch(PDO::FETCH_ASSOC);
+
+    if ($billRow) {
+        $notif = $pdo->prepare("
+            INSERT INTO notifications (user_id, title, message, type)
+            VALUES (:uid, 'Payment Verified & Confirmed', :msg, 'confirmed')
+        ");
+        $notif->execute([
+            ':uid' => $billRow['user_id'],
+            ':msg' => "Your payment for invoice [{$billRow['invoice_number']}] has been verified and marked as Paid by Administration."
+        ]);
+    }
+    
+    $staff_msg = "Payment verified successfully!";
+}
+
+// ==========================================
+// 3. FETCH PENDING PAYMENTS (RECEIPTS & ONSITE)
+// ==========================================
+// Debugging check: Uncomment this line to see what the database holds
+// var_dump($pdo->query("SELECT payment_status FROM billings")->fetchAll());
+// ==========================================
+// 3. FETCH PENDING PAYMENTS
+// ==========================================
+// ==========================================
+// 3. FETCH PENDING PAYMENTS
+// ==========================================
+// We use REGEXP to catch any status containing the word "Pending"
 $pendingBillsStmt = $pdo->query("
     SELECT b.*, u.full_name AS patient_name 
     FROM billings b
     JOIN users u ON b.user_id = u.id
-    WHERE b.payment_status LIKE '%Pending%'
+    WHERE b.payment_status REGEXP 'Pending'
     ORDER BY b.created_at ASC
 ");
 $pendingPayments = $pendingBillsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-
-
-
+// Fetch Admin Notifications
 $notifStmt = $pdo->prepare("
     SELECT * FROM notifications 
     WHERE user_id = :aid 
@@ -94,9 +137,7 @@ $notifStmt->execute([':aid' => $admin_id]);
 $adminNotifications = $notifStmt->fetchAll(PDO::FETCH_ASSOC);
 $unreadCount = count(array_filter($adminNotifications, fn($n) => $n['is_read'] == 0));
 
-
-
-
+// Fetch Doctor Audits & Incidents
 $docAuditStmt = $pdo->query("
     SELECT id, full_name, identifier, department, unavailable_count 
     FROM users 
@@ -105,7 +146,6 @@ $docAuditStmt = $pdo->query("
 ");
 $doctorAudits = $docAuditStmt->fetchAll(PDO::FETCH_ASSOC);
 $totalDoctorStrikes = array_sum(array_column($doctorAudits, 'unavailable_count'));
-
 
 $logStmt = $pdo->query("
     SELECT l.*, 
@@ -167,7 +207,6 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
             letter-spacing: 0.05em;
         }
 
-       
         .notif-wrapper { position: relative; display: inline-block; }
         .notif-btn {
             background: #ffffff;
@@ -265,7 +304,6 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
                     <?php endif; ?>
                 </button>
 
-                <!-- Dropdown -->
                 <div class="notif-dropdown" id="adminNotifDropdown">
                     <div class="notif-header">
                         <h4>Admin Incident Alerts</h4>
@@ -319,8 +357,8 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
             <div class="alert alert--error"><?= htmlspecialchars($staff_error) ?></div>
         <?php endif; ?>
 
-        <!-- 3 CARDS DASHBOARD GRID -->
-        <div class="dashboard__grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));">
+        <!-- 4 CARDS DASHBOARD GRID -->
+        <div class="dashboard__grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
 
             <!-- Card 1: Inventory -->
             <div class="card" id="openInventoryModal" role="button" tabindex="0">
@@ -360,7 +398,7 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
                 <span class="card__link">View Analytics &rarr;</span>
             </div>
 
-            <!-- Card 3: Doctor Unavailability & Attendance (NEW) -->
+            <!-- Card 3: Doctor Unavailability & Attendance -->
             <div class="card" id="openUnavailReportModal" role="button" tabindex="0">
                 <div>
                     <div class="card__icon" style="background:#fee2e2; color:#dc2626;">
@@ -373,7 +411,7 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
                     
                     <div class="pill-group">
                         <span class="pill <?= $totalDoctorStrikes > 0 ? 'pill--danger' : 'pill--ok' ?>">
-                            <?= $totalDoctorStrikes ?> Total Unavailability Incident(s)
+                            <?= $totalDoctorStrikes ?> Total Incident(s)
                         </span>
                         <span class="pill pill--neutral"><?= count($doctorAudits) ?> Active Doctors</span>
                     </div>
@@ -381,12 +419,12 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
                 <span class="card__link">View Doctor Audits &rarr;</span>
             </div>
 
-            <!-- Card: Payment Verification Queue -->
+            <!-- Card 4: Payment Verification Queue -->
             <div class="card" id="openPaymentVerifyModal" role="button" tabindex="0">
                 <div>
                     <div class="card__icon" style="background: #e0f2fe; color: #0284c7;">💰</div>
                     <h3 class="card__title">Payment Verifications</h3>
-                    <p class="card__desc">Review on-site payments and uploaded receipt proofs submitted by patients.</p>
+                    <p class="card__desc">Review online payment receipts and on-site cash payments pending approval.</p>
                     <div class="pill-group">
                         <span class="pill pill--warn"><?= count($pendingPayments) ?> Pending Verification(s)</span>
                     </div>
@@ -397,9 +435,7 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
     </main>
 
-    <!-- ==========================================
-         MODAL: DOCTOR UNAVAILABILITY AUDIT & COUNTER
-         ========================================== -->
+    <!-- MODAL: DOCTOR AUDIT -->
     <div class="modal-overlay" id="unavailReportModal" aria-hidden="true">
         <div class="modal modal--wide">
             <div class="modal__header">
@@ -407,11 +443,7 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
                 <button class="modal__close" data-close="unavailReportModal">&times;</button>
             </div>
             <div class="modal__body">
-                
-                <!-- 1. Doctor Counter Scoreboard -->
-                <h4 style="margin-bottom: 0.75rem; font-size: 0.95rem; color: var(--text-dark);">
-                    Physician Incident Counters
-                </h4>
+                <h4 style="margin-bottom: 0.75rem; font-size: 0.95rem; color: var(--text-dark);">Physician Incident Counters</h4>
                 <div class="table-wrapper" style="margin-bottom: 1.75rem;">
                     <table class="data-table">
                         <thead>
@@ -430,11 +462,7 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
                                         <td><strong><?= htmlspecialchars($doc['full_name']) ?></strong></td>
                                         <td><?= htmlspecialchars($doc['department'] ?? 'General') ?></td>
                                         <td><?= htmlspecialchars($doc['identifier']) ?></td>
-                                        <td>
-                                            <span style="font-weight: 700; color: <?= $doc['unavailable_count'] > 0 ? '#b91c1c' : '#15803d' ?>;">
-                                                <?= $doc['unavailable_count'] ?> Incident(s)
-                                            </span>
-                                        </td>
+                                        <td><span style="font-weight: 700; color: <?= $doc['unavailable_count'] > 0 ? '#b91c1c' : '#15803d' ?>;"><?= $doc['unavailable_count'] ?> Incident(s)</span></td>
                                         <td>
                                             <?php if ($doc['unavailable_count'] >= 3): ?>
                                                 <span class="pill pill--danger">Review Needed</span>
@@ -447,18 +475,13 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
                                     </tr>
                                 <?php endforeach; ?>
                             <?php else: ?>
-                                <tr>
-                                    <td colspan="5" style="text-align:center; color:var(--text-muted);">No doctor accounts registered.</td>
-                                </tr>
+                                <tr><td colspan="5" style="text-align:center; color:var(--text-muted);">No doctor accounts registered.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
 
-                <!-- 2. Recent Reassignment Incident Logs -->
-                <h4 style="margin-bottom: 0.75rem; font-size: 0.95rem; color: var(--text-dark);">
-                    Recent Reassignment Audit Logs
-                </h4>
+                <h4 style="margin-bottom: 0.75rem; font-size: 0.95rem; color: var(--text-dark);">Recent Reassignment Audit Logs</h4>
                 <div class="table-wrapper">
                     <table class="data-table">
                         <thead>
@@ -482,16 +505,11 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
                                     </tr>
                                 <?php endforeach; ?>
                             <?php else: ?>
-                                <tr>
-                                    <td colspan="5" style="text-align:center; color:var(--text-muted); padding: 1.5rem 0;">
-                                        No doctors have declared unavailability yet. Perfect attendance recorded.
-                                    </td>
-                                </tr>
+                                <tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding: 1.5rem 0;">No incident logs recorded.</td></tr>
                             <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
-
                 <div class="modal-footer-actions" style="margin-top: 1.5rem;">
                     <button class="btn btn--outline" data-close="unavailReportModal">Close Audit</button>
                 </div>
@@ -509,7 +527,6 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
             <div class="modal__body">
                 <form action="admin.php" method="POST" class="staff-form">
                     <input type="hidden" name="action" value="register_staff">
-
                     <div class="form-group">
                         <label for="role">Account Role</label>
                         <select name="role" id="role" required>
@@ -517,11 +534,8 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
                             <option value="admin">Administrator</option>
                         </select>
                     </div>
-
                     <div class="form-group" id="deptGroup">
-                        <label for="department">
-                            Medical Department <span id="deptRequiredStar" style="color: #dc2626;">*</span>
-                        </label>
+                        <label for="department">Medical Department <span id="deptRequiredStar" style="color: #dc2626;">*</span></label>
                         <select name="department" id="department" required>
                             <option value="">-- Choose Department --</option>
                             <option value="Cardiology">Cardiology</option>
@@ -529,36 +543,28 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
                             <option value="Dermatology">Dermatology</option>
                             <option value="General Medicine">General Medicine</option>
                         </select>
-                        <small id="deptOptionalNotice" style="font-size: 0.75rem; color: var(--text-muted); display: none;">
-                            (Optional for Administrator accounts)
-                        </small>
+                        <small id="deptOptionalNotice" style="font-size: 0.75rem; color: var(--text-muted); display: none;">(Optional for Administrator accounts)</small>
                     </div>
-
                     <div class="form-group">
                         <label for="fullName">Full Name</label>
                         <input type="text" id="fullName" name="fullName" placeholder="e.g. Dr. Michael Chen" required>
                     </div>
-
                     <div class="form-group">
                         <label for="identifier">Username / Email</label>
-                        <input type="text" id="identifier" name="identifier" placeholder="e.g. dr.chen@hosplinic or chen_md" required>
+                        <input type="text" id="identifier" name="identifier" placeholder="e.g. dr.chen@hosplinic" required>
                     </div>
-
                     <div class="form-group">
                         <label for="phoneNumber">Phone Number</label>
                         <input type="tel" id="phoneNumber" name="phoneNumber" placeholder="e.g. +1 555-019-2834" required>
                     </div>
-
                     <div class="form-group">
                         <label for="password">Password</label>
                         <input type="password" id="password" name="password" placeholder="••••••••" required>
                     </div>
-
                     <div class="form-group">
                         <label for="confirmPassword">Confirm Password</label>
                         <input type="password" id="confirmPassword" name="confirmPassword" placeholder="••••••••" required>
                     </div>
-
                     <div class="modal-footer-actions">
                         <button type="submit" class="btn btn--primary" style="flex:1;">Create Staff Account</button>
                         <button type="button" class="btn btn--outline" data-close="staffModal">Cancel</button>
@@ -578,33 +584,14 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
             <div class="modal__body">
                 <div class="table-wrapper">
                     <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Item Name</th>
-                                <th>Category</th>
-                                <th>Quantity</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
+                        <thead><tr><th>Item Name</th><th>Category</th><th>Quantity</th><th>Status</th></tr></thead>
                         <tbody>
-                            <tr>
-                                <td><strong>Amoxicillin 500mg</strong></td>
-                                <td>Antibiotic</td>
-                                <td>12 boxes</td>
-                                <td><span class="pill pill--danger">Critical Low</span></td>
-                            </tr>
-                            <tr>
-                                <td><strong>Surgical Gloves (M)</strong></td>
-                                <td>PPE</td>
-                                <td>45 boxes</td>
-                                <td><span class="pill pill--ok">Optimal</span></td>
-                            </tr>
+                            <tr><td><strong>Amoxicillin 500mg</strong></td><td>Antibiotic</td><td>12 boxes</td><td><span class="pill pill--danger">Critical Low</span></td></tr>
+                            <tr><td><strong>Surgical Gloves (M)</strong></td><td>PPE</td><td>45 boxes</td><td><span class="pill pill--ok">Optimal</span></td></tr>
                         </tbody>
                     </table>
                 </div>
-                <div class="modal-footer-actions">
-                    <button class="btn btn--outline" data-close="inventoryModal">Close</button>
-                </div>
+                <div class="modal-footer-actions"><button class="btn btn--outline" data-close="inventoryModal">Close</button></div>
             </div>
         </div>
     </div>
@@ -622,9 +609,7 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
                     <div class="stat-item"><small>Monthly Visits</small><strong>620</strong></div>
                     <div class="stat-item"><small>Satisfaction</small><strong>96.4%</strong></div>
                 </div>
-                <div class="modal-footer-actions">
-                    <button class="btn btn--outline" data-close="analyticsModal">Close</button>
-                </div>
+                <div class="modal-footer-actions"><button class="btn btn--outline" data-close="analyticsModal">Close</button></div>
             </div>
         </div>
     </div>
@@ -674,17 +659,11 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
     </div>
 
-<script>
-    // Trigger script for admin payment verify modal
-    document.getElementById('openPaymentVerifyModal').addEventListener('click', () => openModal('paymentVerifyModal'));
-</script>
-
     <footer class="footer">
         <p>&copy; <?= date('Y') ?> Hosplinic Management System &bull; Admin Portal</p>
     </footer>
 
     <script>
-        
         const adminNotifBtn = document.getElementById('adminNotifBtn');
         const adminNotifDropdown = document.getElementById('adminNotifDropdown');
 
@@ -701,7 +680,6 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
             });
         }
 
-        
         const roleSelect = document.getElementById('role');
         const deptSelect = document.getElementById('department');
         const deptRequiredStar = document.getElementById('deptRequiredStar');
@@ -722,7 +700,6 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
         roleSelect.addEventListener('change', toggleDepartmentRequirement);
         toggleDepartmentRequirement();
 
-        
         function openModal(id) {
             const modal = document.getElementById(id);
             if (modal) {
@@ -745,6 +722,7 @@ $incidentLogs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
         document.getElementById('openInventoryModal').addEventListener('click', () => openModal('inventoryModal'));
         document.getElementById('openAnalyticsModal').addEventListener('click', () => openModal('analyticsModal'));
         document.getElementById('openUnavailReportModal').addEventListener('click', () => openModal('unavailReportModal'));
+        document.getElementById('openPaymentVerifyModal').addEventListener('click', () => openModal('paymentVerifyModal'));
 
         document.querySelectorAll('[data-close]').forEach(btn => {
             btn.addEventListener('click', () => closeModal(btn.getAttribute('data-close')));

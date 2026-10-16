@@ -33,32 +33,33 @@ function getMinBookingDate() {
 // ==========================================
 // 0. AJAX API: CHECK HOURLY SLOT CAPACITY
 // ==========================================
-if (isset($_GET['check_slot']) && isset($_GET['date']) && isset($_GET['time'])) {
+if (isset($_GET['check_slot']) && isset($_GET['date']) && isset($_GET['time']) && isset($_GET['doctor_id'])) {
     header('Content-Type: application/json');
     $checkDate = trim($_GET['date']);
     $checkTime = trim($_GET['time']); // e.g. "08:00:00"
     $targetHour = substr($checkTime, 0, 2); // "08"
+    $doctorId = intval($_GET['doctor_id']);
 
-    $docCountStmt = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'doctor' AND department IS NOT NULL");
-    $totalActiveDoctors = max(1, intval($docCountStmt->fetchColumn()));
-    $maxCapacity = $totalActiveDoctors * 3;
+    $maxCapacityPerDoctor = 3; // Max 3 patients per doctor per hour
 
     $slotQuery = $pdo->prepare("
         SELECT COUNT(*) FROM appointments 
-        WHERE DATE(appointment_datetime) = :bdate 
+        WHERE doctor_id = :doc_id
+          AND DATE(appointment_datetime) = :bdate 
           AND HOUR(appointment_datetime) = :bhour 
           AND status != 'Cancelled'
     ");
     $slotQuery->execute([
-        ':bdate' => $checkDate,
-        ':bhour' => $targetHour
+        ':doc_id' => $doctorId,
+        ':bdate'  => $checkDate,
+        ':bhour'  => $targetHour
     ]);
     $bookedCount = intval($slotQuery->fetchColumn());
 
     echo json_encode([
-        'is_full' => ($bookedCount >= $maxCapacity),
+        'is_full' => ($bookedCount >= $maxCapacityPerDoctor),
         'booked' => $bookedCount,
-        'max' => $maxCapacity
+        'max' => $maxCapacityPerDoctor
     ]);
     exit;
 }
@@ -100,17 +101,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
     }
 
-    $docCountStmt = $pdo->query("SELECT COUNT(*) FROM users WHERE role = 'doctor' AND department IS NOT NULL");
-    $totalActiveDoctors = max(1, intval($docCountStmt->fetchColumn()));
-    $maxCapacity = $totalActiveDoctors * 3;
-
+    $maxCapacityPerDoctor = 3;
     $slotQuery = $pdo->prepare("
         SELECT COUNT(*) FROM appointments 
-        WHERE DATE(appointment_datetime) = :bdate 
+        WHERE doctor_id = :doc_id
+          AND DATE(appointment_datetime) = :bdate 
           AND HOUR(appointment_datetime) = :bhour 
           AND status != 'Cancelled'
     ");
-    $slotQuery->execute([':bdate' => $bookDate, ':bhour' => $targetHour]);
+    $slotQuery->execute([
+        ':doc_id' => $doctor_id,
+        ':bdate'  => $bookDate,
+        ':bhour'  => $targetHour
+    ]);
     $bookedCount = intval($slotQuery->fetchColumn());
 
     $selectedTimestamp = strtotime($dateTime);
@@ -124,8 +127,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     } elseif ($bookDate < $minDateStr) {
         $booking_error = "Booking policy violation: Same-day or rush bookings are disabled. Earliest allowed date is " . $minAllowedDate->format('M d, Y') . ".";
         $open_modal = 'bookModal';
-    } elseif ($bookedCount >= $maxCapacity) {
-        $booking_error = "This hour slot is fully booked (Max capacity reached). Please select another time or date.";
+    } elseif ($bookedCount >= $maxCapacityPerDoctor) {
+        $booking_error = "This hour slot is fully booked for this specialist (Max 3 patients). Please select another time or date.";
         $open_modal = 'bookModal';
     } elseif ($dayOfWeek === 7) {
         $booking_error = "The clinic is closed on Sundays. Please select Monday through Saturday.";
@@ -356,6 +359,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
+// ==========================================
+// 3. SUBMIT PAYMENT WITH RECEIPT OR ONSITE PENDING
+// ==========================================
+// ==========================================
+// 3. SUBMIT PAYMENT PROOF
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'submit_payment') {
     $bill_id = intval($_POST['bill_id'] ?? 0);
     $method = trim($_POST['payment_method'] ?? '');
@@ -377,31 +386,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
     }
 
-    if (in_array($method, ['GCash', 'Maya', 'Card']) && empty($receiptPath)) {
-        $booking_error = "Proof of payment receipt is required for online payment methods.";
-        $open_modal = 'billingModal';
-    } else {
-        $payStatus = ($method === 'Onsite Payment') ? 'Payment Pending (On-site verification)' : 'Paid';
+    // Force all submissions to be 'Pending' for Admin approval
+    // Ensure this matches the Admin's regex logic
+    $payStatus = ($method === 'Onsite Payment') 
+        ? 'Payment Pending (On-site verification)' 
+        : 'Payment Pending (Receipt Verification)';
 
-        $stmt = $pdo->prepare("
-            UPDATE billings 
-            SET payment_method = :method, receipt_path = :rpath, receipt_name = :rname, payment_status = :pstatus 
-            WHERE id = :id AND user_id = :user_id
-        ");
-        $stmt->execute([
-            ':method'  => $method,
-            ':rpath'   => $receiptPath,
-            ':rname'   => $receiptName,
-            ':pstatus' => $payStatus,
-            ':id'      => $bill_id,
-            ':user_id' => $user_id
-        ]);
+    // Update billing
+    $stmt = $pdo->prepare("
+        UPDATE billings 
+        SET payment_method = :method, 
+            receipt_path = :rpath, 
+            receipt_name = :rname, 
+            payment_status = :pstatus 
+        WHERE id = :id AND user_id = :user_id
+    ");
+    $stmt->execute([
+        ':method'  => $method,
+        ':rpath'   => $receiptPath,
+        ':rname'   => $receiptName,
+        ':pstatus' => $payStatus,
+        ':id'      => $bill_id,
+        ':user_id' => $user_id
+    ]);
 
-        $booking_msg = ($method === 'Onsite Payment') 
-            ? "On-site payment selected. Status is <strong>Payment Pending</strong> until admin verification." 
-            : "Payment submitted successfully with receipt proof!";
-        $open_modal = 'billingModal';
-    }
+    // Admin Notification
+    $adminNotif = $pdo->prepare("
+        INSERT INTO notifications (user_id, title, message, type)
+        SELECT id, 'New Payment Submission', :msg, 'reminder'
+        FROM users WHERE role = 'admin'
+    ");
+    $adminNotif->execute([':msg' => "Patient $patient_full_name submitted a payment via $method for Invoice #$bill_id. Please verify."]);
+
+    $booking_msg = "Payment submitted via $method! Status is now <strong>Pending Admin Verification</strong>.";
+    $open_modal = 'billingModal';
 }
 
 // ==========================================
@@ -413,7 +431,8 @@ $billings = $billQuery->fetchAll(PDO::FETCH_ASSOC);
 
 $totalOutstanding = 0.00;
 foreach ($billings as $b) {
-    if ($b['payment_status'] === 'Unpaid') {
+    // Only count as outstanding if payment status is explicitly Unpaid or Pending
+    if ($b['payment_status'] === 'Unpaid' || strpos($b['payment_status'], 'Pending') !== false) {
         $totalOutstanding += $b['total_amount'];
     }
 }
@@ -781,10 +800,10 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                             </svg>
                         </div>
                         <h3 class="card__title">Book Appointment</h3>
-                        <p class="card__desc">Choose your department. Subject to max hourly capacity limits (Max 3/doc/hour).</p>
+                        <p class="card__desc">Choose your department. Must be booked at least 3 business days in advance.</p>
                         
                         <div class="pill-group">
-                            <span class="pill pill--pending">Capacity Control Active</span>
+                            <span class="pill pill--pending">3 Working Days Advance Policy</span>
                         </div>
                     </div>
                     <span class="card__link">+ Request Visit Now &rarr;</span>
@@ -919,7 +938,7 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                     <input type="hidden" name="doctor_id" id="autoDoctorId" value="">
 
                     <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 0.75rem 1rem; border-radius: var(--radius-md); font-size: 0.8rem; color: #1e40af; margin-bottom: 0.5rem;">
-                        &#128197; <strong>Capacity Policy:</strong> Slots are limited to 3-4 patients per doctor per hour. Fully booked hours will be disabled.
+                        &#128197; <strong>Scheduling Policy:</strong> Previous dates, same-day, and the next 3 business days are <strong>strictly disabled</strong> on the calendar below.
                     </div>
 
                     <div class="form-group">
@@ -997,10 +1016,110 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                     </div>
 
                     <div class="modal-actions" style="margin-top: 1rem;">
-                        <button type="submit" class="btn btn--primary" style="flex:1;">Confirm & Book</button>
+                        <button type="submit" class="btn btn--primary" style="flex:1;">Confirm & Book (₱500)</button>
                         <button type="button" class="btn btn--outline" data-close="bookModal">Cancel</button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    
+
+    <!-- MODAL: BILLING -->
+    <div class="modal-overlay" id="billingModal" aria-hidden="true">
+        <div class="modal modal--wide">
+            <div class="modal__header">
+                <h3>Billing & Statements</h3>
+                <button class="modal__close" data-close="billingModal">&times;</button>
+            </div>
+            <div class="modal__body">
+                <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 0.85rem 1rem; border-radius: var(--radius-md); font-size: 0.85rem; color: #166534; margin-bottom: 1.25rem;">
+                    &#128197; <strong>Flexible Payment Policy:</strong> Payments can be made after your consultation date or hour. Pre-payment is completely optional.
+                </div>
+
+                <div class="billing-summary-box">
+                    <div>
+                        <small>Total Outstanding Balance</small>
+                        <strong class="billing-balance">₱<?= number_format($totalOutstanding, 2) ?></strong>
+                    </div>
+                    <?php if ($totalOutstanding > 0): ?>
+                        <span class="pill pill--warn" style="background:#fee2e2; color:#b91c1c;">Payment Pending</span>
+                    <?php else: ?>
+                        <span class="pill pill--ok">All Invoices Paid</span>
+                    <?php endif; ?>
+                </div>
+
+                <h4 style="margin: 1.5rem 0 0.75rem 0; font-size: 0.95rem;">Recent Invoices</h4>
+
+                <?php if (count($billings) > 0): ?>
+                    <?php foreach ($billings as $bill): ?>
+                        <div class="invoice-card">
+                            <div class="invoice-card__top">
+                                <div>
+                                    <strong style="font-size: 0.95rem; color: var(--text-dark);"><?= htmlspecialchars($bill['invoice_number']) ?></strong>
+                                    <p style="font-size: 0.825rem; color: var(--text-muted);"><?= htmlspecialchars($bill['description']) ?> &bull; <?= date('M d, Y', strtotime($bill['created_at'])) ?></p>
+                                </div>
+                                <div style="text-align: right;">
+                                    <strong style="font-size: 1.1rem; color: var(--text-dark);">₱<?= number_format($bill['total_amount'], 2) ?></strong>
+                                    <div>
+                                        <?php 
+                                            $isPaid = ($bill['payment_status'] === 'Paid');
+                                            $isPending = (strpos($bill['payment_status'], 'Pending') !== false);
+                                        ?>
+                                        <span class="pill <?= $bill['payment_status'] === 'Paid' ? 'pill--ok' : 'pill--pending' ?>">
+                                            <?= htmlspecialchars($bill['payment_status']) ?>
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="font-size: 0.8rem; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 0.5rem; display: flex; justify-content: space-between;">
+                                <span>Fee:</span>
+                                <span>₱<?= number_format($bill['base_fee'], 2) ?></span>
+                            </div>
+
+                            <?php if (!empty($bill['lab_name']) && $bill['lab_fee'] > 0): ?>
+                                <div class="lab-recommendation-box">
+                                    <div style="font-size: 0.8rem;">
+                                        <strong>&#129514; Doctor's Recommended Lab Test:</strong>
+                                        <p style="margin: 0; color: var(--text-body);"><?= htmlspecialchars($bill['lab_name']) ?> (<strong>+₱<?= number_format($bill['lab_fee'], 2) ?></strong>)</p>
+                                    </div>
+
+                                    <?php if ($bill['lab_status'] === 'pending' && $bill['payment_status'] === 'Unpaid'): ?>
+                                        <form action="patient.php" method="POST" style="display: flex; gap: 0.4rem;">
+                                            <input type="hidden" name="action" value="respond_lab">
+                                            <input type="hidden" name="bill_id" value="<?= $bill['id'] ?>">
+                                            <button type="submit" name="decision" value="accept" class="btn btn--primary" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;">Accept (+₱<?= number_format($bill['lab_fee'], 0) ?>)</button>
+                                            <button type="submit" name="decision" value="decline" class="btn btn--outline" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;">Decline</button>
+                                        </form>
+                                    <?php elseif ($bill['lab_status'] === 'accepted'): ?>
+                                        <span class="pill pill--ok" style="font-size: 0.75rem;">&#10003; Lab Accepted (+₱<?= number_format($bill['lab_fee'], 2) ?>)</span>
+                                    <?php elseif ($bill['lab_status'] === 'declined'): ?>
+                                        <span class="pill pill--neutral" style="font-size: 0.75rem;">&#10005; Lab Declined</span>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endif; ?>
+
+                            <!-- Payment Action Button -->
+                            <?php if ($bill['payment_status'] === 'Unpaid'): ?>
+                                <button type="button" onclick="openPaymentModal(<?= $bill['id'] ?>)" class="btn btn--primary" style="width: 100%; padding: 0.5rem;">
+                                    Pay Balance
+                                </button>
+                            <?php elseif ($isPending): ?>
+                                <span class="pill pill--pending" style="display:block; text-align:center; padding:0.4rem;">
+                                    Awaiting Admin Verification
+                                </span>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <p style="text-align: center; color: var(--text-muted); font-size: 0.85rem; padding: 2rem 0;">No invoices generated yet.</p>
+                <?php endif; ?>
+
+                <div class="modal-actions" style="margin-top: 1.5rem;">
+                    <button class="btn btn--outline" data-close="billingModal">Close</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1045,102 +1164,6 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                         <button type="button" class="btn btn--outline" id="cancelPaymentModal">Cancel</button>
                     </div>
                 </form>
-            </div>
-        </div>
-    </div>
-
-    <!-- MODAL: BILLING -->
-    <div class="modal-overlay" id="billingModal" aria-hidden="true">
-        <div class="modal modal--wide">
-            <div class="modal__header">
-                <h3>Billing & Statements</h3>
-                <button class="modal__close" data-close="billingModal">&times;</button>
-            </div>
-            <div class="modal__body">
-                <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 0.85rem 1rem; border-radius: var(--radius-md); font-size: 0.85rem; color: #166534; margin-bottom: 1.25rem;">
-                    &#128197; <strong>Flexible Payment Policy:</strong> Payments can be made after your consultation date or hour. Pre-payment is completely optional.
-                </div>
-
-                <div class="billing-summary-box">
-                    <div>
-                        <small>Total Outstanding Balance</small>
-                        <strong class="billing-balance">₱<?= number_format($totalOutstanding, 2) ?></strong>
-                    </div>
-                    <?php if ($totalOutstanding > 0): ?>
-                        <span class="pill pill--warn" style="background:#fee2e2; color:#b91c1c;">Payment Pending</span>
-                    <?php else: ?>
-                        <span class="pill pill--ok">All Invoices Paid</span>
-                    <?php endif; ?>
-                </div>
-
-                <h4 style="margin: 1.5rem 0 0.75rem 0; font-size: 0.95rem;">Recent Invoices</h4>
-
-                <?php if (count($billings) > 0): ?>
-                    <?php foreach ($billings as $bill): ?>
-                        <div class="invoice-card">
-                            <div class="invoice-card__top">
-                                <div>
-                                    <strong style="font-size: 0.95rem; color: var(--text-dark);"><?= htmlspecialchars($bill['invoice_number']) ?></strong>
-                                    <p style="font-size: 0.825rem; color: var(--text-muted);"><?= htmlspecialchars($bill['description']) ?> &bull; <?= date('M d, Y', strtotime($bill['created_at'])) ?></p>
-                                </div>
-                                <div style="text-align: right;">
-                                    <strong style="font-size: 1.1rem; color: var(--text-dark);">₱<?= number_format($bill['total_amount'], 2) ?></strong>
-                                    <div>
-                                        <span class="pill <?= $bill['payment_status'] === 'Paid' ? 'pill--ok' : 'pill--warn' ?>">
-                                            <?= htmlspecialchars($bill['payment_status']) ?>
-                                        </span>
-                                        <?php if (!empty($bill['payment_method'])): ?>
-                                            <small style="display:block; color:var(--text-muted); font-size:0.75rem;">Via <?= htmlspecialchars($bill['payment_method']) ?></small>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div style="font-size: 0.8rem; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 0.5rem; display: flex; justify-content: space-between;">
-                                <span>Fee:</span>
-                                <span>₱<?= number_format($bill['base_fee'], 2) ?></span>
-                            </div>
-
-                            <?php if (!empty($bill['lab_name']) && $bill['lab_fee'] > 0): ?>
-                                <div class="lab-recommendation-box">
-                                    <div style="font-size: 0.8rem;">
-                                        <strong>&#129514; Doctor's Recommended Lab Test:</strong>
-                                        <p style="margin: 0; color: var(--text-body);"><?= htmlspecialchars($bill['lab_name']) ?> (<strong>+₱<?= number_format($bill['lab_fee'], 2) ?></strong>)</p>
-                                    </div>
-
-                                    <?php if ($bill['lab_status'] === 'pending' && $bill['payment_status'] === 'Unpaid'): ?>
-                                        <form action="patient.php" method="POST" style="display: flex; gap: 0.4rem;">
-                                            <input type="hidden" name="action" value="respond_lab">
-                                            <input type="hidden" name="bill_id" value="<?= $bill['id'] ?>">
-                                            <button type="submit" name="decision" value="accept" class="btn btn--primary" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;">Accept (+₱<?= number_format($bill['lab_fee'], 0) ?>)</button>
-                                            <button type="submit" name="decision" value="decline" class="btn btn--outline" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;">Decline</button>
-                                        </form>
-                                    <?php elseif ($bill['lab_status'] === 'accepted'): ?>
-                                        <span class="pill pill--ok" style="font-size: 0.75rem;">&#10003; Lab Accepted (+₱<?= number_format($bill['lab_fee'], 2) ?>)</span>
-                                    <?php elseif ($bill['lab_status'] === 'declined'): ?>
-                                        <span class="pill pill--neutral" style="font-size: 0.75rem;">&#10005; Lab Declined</span>
-                                    <?php endif; ?>
-                                </div>
-                            <?php endif; ?>
-
-                            <?php if ($bill['payment_status'] === 'Unpaid'): ?>
-                                <div style="margin-top: 0.25rem;">
-                                    <button type="button" onclick="openPaymentModal(<?= $bill['id'] ?>)" class="btn btn--primary" style="width: 100%; padding: 0.5rem; font-size: 0.85rem;">
-                                        Pay Balance (₱<?= number_format($bill['total_amount'], 2) ?>)
-                                    </button>
-                                </div>
-                            <?php elseif (strpos($bill['payment_status'], 'Pending') !== false): ?>
-                                <span class="pill pill--pending" style="display:block; text-align:center; padding:0.4rem;">Receipt submitted. Awaiting Admin verification.</span>
-                            <?php endif; ?>
-                        </div>
-                    <?php endforeach; ?>
-                <?php else: ?>
-                    <p style="text-align: center; color: var(--text-muted); font-size: 0.85rem; padding: 2rem 0;">No invoices generated yet.</p>
-                <?php endif; ?>
-
-                <div class="modal-actions" style="margin-top: 1.5rem;">
-                    <button class="btn btn--outline" data-close="billingModal">Close</button>
-                </div>
             </div>
         </div>
     </div>
@@ -1197,7 +1220,7 @@ $minDateOnly = $minDateObj->format('Y-m-d');
         <p>&copy; <?= date('Y') ?> Hosplinic Management System &bull; Patient Care Portal</p>
     </footer>
 
-    <!-- Interactive Scripts -->
+    <!-- Scripts -->
     <script>
         const registeredDoctors = <?= json_encode($dbDoctors) ?>;
         const patientAppointments = <?= json_encode($appointments) ?>;
@@ -1289,32 +1312,38 @@ $minDateOnly = $minDateObj->format('Y-m-d');
             }
         }
 
-        // Standard clinic consultation time slots
-        const availableTimeSlots = [
-            { val: "08:00:00", label: "08:00 AM" },
-            { val: "09:00:00", label: "09:00 AM" },
-            { val: "10:00:00", label: "10:00 AM" },
-            { val: "11:00:00", label: "11:00 AM" },
-            { val: "13:00:00", label: "01:00 PM" },
-            { val: "14:00:00", label: "02:00 PM" },
-            { val: "15:00:00", label: "03:00 PM" },
-            { val: "16:00:00", label: "04:00 PM" }
-        ];
-
         if (bookDateInput) {
             bookDateInput.addEventListener('change', async function() {
                 const dateVal = this.value;
+                const assignedDoctorId = autoDoctorId.value;
+
                 if (!dateVal) return;
+
+                if (!assignedDoctorId) {
+                    alert("Please select a medical department first so we can assign a specialist.");
+                    this.value = "";
+                    return;
+                }
 
                 validatePickedDate(dateVal, deptSelect.value);
 
                 bookTimeSelect.disabled = false;
-                slotCapacityHint.innerText = "Checking slot capacity...";
+                slotCapacityHint.innerText = "Checking specialist availability...";
 
-                // Clear dropdown and rebuild options
                 bookTimeSelect.innerHTML = '<option value="">Select Time Slot...</option>';
 
-                for (let slot of availableTimeSlots) {
+                const options = [
+                    { val: "08:00:00", label: "08:00 AM" },
+                    { val: "09:00:00", label: "09:00 AM" },
+                    { val: "10:00:00", label: "10:00 AM" },
+                    { val: "11:00:00", label: "11:00 AM" },
+                    { val: "13:00:00", label: "01:00 PM" },
+                    { val: "14:00:00", label: "02:00 PM" },
+                    { val: "15:00:00", label: "03:00 PM" },
+                    { val: "16:00:00", label: "04:00 PM" }
+                ];
+
+                for (let slot of options) {
                     const timeVal = slot.val;
                     const timeLabel = slot.label;
                     let isFull = false;
@@ -1322,7 +1351,7 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                     let maxCap = 3;
 
                     try {
-                        const res = await fetch(`patient.php?check_slot=1&date=${dateVal}&time=${timeVal}`);
+                        const res = await fetch(`patient.php?check_slot=1&date=${dateVal}&time=${timeVal}&doctor_id=${assignedDoctorId}`);
                         const data = await res.json();
                         isFull = data.is_full;
                         bookedCount = data.booked;
@@ -1336,7 +1365,7 @@ $minDateOnly = $minDateObj->format('Y-m-d');
 
                     if (isFull) {
                         opt.disabled = true;
-                        opt.text = `${timeLabel} — FULLY BOOKED (${bookedCount}/${maxCap})`;
+                        opt.text = `${timeLabel} — DOCTOR FULL (${bookedCount}/${maxCap} booked)`;
                         opt.style.color = '#ef4444';
                     } else {
                         opt.disabled = false;
@@ -1345,7 +1374,7 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                     }
                     bookTimeSelect.appendChild(opt);
                 }
-                slotCapacityHint.innerText = "Time slots are limited";
+                slotCapacityHint.innerText = "Available slots loaded for this specialist (Max 3/hour).";
             });
         }
 
