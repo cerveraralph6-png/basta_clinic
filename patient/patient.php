@@ -2,23 +2,9 @@
 session_start();
 require_once '../db.php';
 
-// Prevent browser from caching protected portal screens
-header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
-header("Cache-Control: post-check=0, pre-check=0", false);
-header("Pragma: no-cache");
-
-
+// Authentication Guard
 if (!isset($_SESSION['user_id'])) {
     header("Location: ../index.php");
-    exit;
-}
-
-
-if (isset($_GET['mark_notifs_read'])) {
-    header('Content-Type: application/json');
-    $markStmt = $pdo->prepare("UPDATE notifications SET is_read = 1 WHERE user_id = :uid AND is_read = 0");
-    $markStmt->execute([':uid' => $user_id]);
-    echo json_encode(['success' => true]);
     exit;
 }
 
@@ -30,31 +16,38 @@ $booking_msg = '';
 $booking_error = '';
 $open_modal = '';
 
+if (isset($_SESSION['patient_flash'])) {
+    $booking_msg = $_SESSION['patient_flash']['message'] ?? '';
+    $booking_error = $_SESSION['patient_flash']['error'] ?? '';
+    $open_modal = $_SESSION['patient_flash']['open_modal'] ?? '';
+    unset($_SESSION['patient_flash']);
+}
 
+// Helper: Calculate earliest date 3 working days ahead (Skipping Sat & Sun)
 function getMinBookingDate() {
     $date = new DateTime();
     $added = 0;
     while ($added < 3) {
         $date->modify('+1 day');
-        $dayOfWeek = (int)$date->format('N'); 
-        if ($dayOfWeek <= 5) { 
+        $dayOfWeek = (int)$date->format('N'); // 1 (Mon) to 7 (Sun)
+        if ($dayOfWeek <= 5) { // Only count Monday - Friday
             $added++;
         }
     }
     return $date;
 }
 
-
-
-
+// ==========================================
+// 0. AJAX API: CHECK HOURLY SLOT CAPACITY
+// ==========================================
 if (isset($_GET['check_slot']) && isset($_GET['date']) && isset($_GET['time']) && isset($_GET['doctor_id'])) {
     header('Content-Type: application/json');
     $checkDate = trim($_GET['date']);
-    $checkTime = trim($_GET['time']); 
-    $targetHour = substr($checkTime, 0, 2); 
+    $checkTime = trim($_GET['time']); // e.g. "08:00:00"
+    $targetHour = substr($checkTime, 0, 2); // "08"
     $doctorId = intval($_GET['doctor_id']);
 
-    $maxCapacityPerDoctor = 3; 
+    $maxCapacityPerDoctor = 3; // Max 3 patients per doctor per hour
 
     $slotQuery = $pdo->prepare("
         SELECT COUNT(*) FROM appointments 
@@ -78,9 +71,9 @@ if (isset($_GET['check_slot']) && isset($_GET['date']) && isset($_GET['time']) &
     exit;
 }
 
-
-
-
+// ==========================================
+// 1. SAVE NEW APPOINTMENT (WITH CAPACITY CHECK)
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'book_appointment') {
     $department = trim($_POST['department'] ?? '');
     $doctor_id  = intval($_POST['doctor_id'] ?? 0);
@@ -196,7 +189,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             ]);
             $appointment_id = $pdo->lastInsertId();
 
-            
+            // Set up Lab Recommendation
             $labName = null;
             $labFee = 0.00;
             $labStatus = 'none';
@@ -215,7 +208,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $labStatus = 'pending';
             }
 
-            
+            // Create Base Billing Invoice
             $invoiceNum = 'INV-' . date('Ymd') . '-' . rand(1000, 9999);
             $baseFee = 500.00;
 
@@ -254,9 +247,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-
-
-
+// ==========================================
+// 2. CANCEL APPOINTMENT
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'cancel_appointment') {
     $apt_id = intval($_POST['appointment_id'] ?? 0);
     $cancel_reason = trim($_POST['cancellation_reason'] ?? '');
@@ -302,7 +295,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 if ($existingBill) {
                     $updBill = $pdo->prepare("
                         UPDATE billings 
-                        SET description = :desc, base_fee = 50.00, lab_fee = 0.00, lab_status = 'declined', total_amount = 50.00, payment_status = 'Unpaid'
+                        SET description = :desc,
+                            base_fee = 50.00,
+                            lab_fee = 0.00,
+                            lab_status = 'declined',
+                            total_amount = 50.00,
+                            payment_status = 'Unpaid',
+                            payment_method = NULL,
+                            receipt_path = NULL,
+                            receipt_name = NULL
                         WHERE id = :bill_id
                     ");
                     $updBill->execute([
@@ -346,9 +347,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-
-
-
+// ==========================================
+// 3. RESPOND TO LAB & SUBMIT PAYMENT WITH PROOF
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'respond_lab') {
     $bill_id = intval($_POST['bill_id'] ?? 0);
     $decision = $_POST['decision'] ?? '';
@@ -372,13 +373,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $open_modal = 'billingModal';
     }
 }
-
-
-
-
-
-
-
+// ==========================================
+// 3. SUBMIT PAYMENT PROOF
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'submit_payment') {
     $bill_id = intval($_POST['bill_id'] ?? 0);
     $method = trim($_POST['payment_method'] ?? '');
@@ -400,20 +397,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
     }
 
-    
-    
-    $payStatus = ($method === 'Onsite Payment') 
-        ? 'Payment Pending (On-site verification)' 
-        : 'Payment Pending (Receipt Verification)';
-
-    
+    $payStatus = 'Pending';
     $stmt = $pdo->prepare("
         UPDATE billings 
         SET payment_method = :method, 
             receipt_path = :rpath, 
             receipt_name = :rname, 
             payment_status = :pstatus 
-        WHERE id = :id AND user_id = :user_id
+        WHERE id = :id AND user_id = :user_id AND payment_status = 'Unpaid'
     ");
     $stmt->execute([
         ':method'  => $method,
@@ -424,30 +415,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         ':user_id' => $user_id
     ]);
 
-    
-    $adminNotif = $pdo->prepare("
-        INSERT INTO notifications (user_id, title, message, type)
-        SELECT id, 'New Payment Submission', :msg, 'reminder'
-        FROM users WHERE role = 'admin'
-    ");
-    $adminNotif->execute([':msg' => "Patient $patient_full_name submitted a payment via $method for Invoice #$bill_id. Please verify."]);
+    if ($stmt->rowCount() === 1) {
+        $adminNotif = $pdo->prepare("
+            INSERT INTO notifications (user_id, title, message, type)
+            SELECT id, 'New Payment Submission', :msg, 'reminder'
+            FROM users WHERE role = 'admin'
+        ");
+        $adminNotif->execute([':msg' => "Patient submitted a payment via $method for Invoice #$bill_id. Please verify."]);
+        $_SESSION['patient_flash'] = [
+            'message' => "Payment submitted via " . htmlspecialchars($method, ENT_QUOTES, 'UTF-8') . "! Status is now <strong>Pending Admin Verification</strong>."
+        ];
+    } else {
+        $statusStmt = $pdo->prepare("
+            SELECT payment_status
+            FROM billings
+            WHERE id = :id AND user_id = :user_id
+        ");
+        $statusStmt->execute([':id' => $bill_id, ':user_id' => $user_id]);
+        $currentStatus = $statusStmt->fetchColumn();
 
-    $booking_msg = "Payment submitted via $method! Status is now <strong>Pending Admin Verification</strong>.";
-    $open_modal = 'billingModal';
+        if ($currentStatus === 'Paid') {
+            $_SESSION['patient_flash'] = [
+                'message' => 'This invoice has already been confirmed as paid.'
+            ];
+        } elseif (is_string($currentStatus) && stripos($currentStatus, 'pending') !== false) {
+            $_SESSION['patient_flash'] = [
+                'message' => 'Payment for this invoice is already awaiting admin verification.'
+            ];
+        } else {
+            $_SESSION['patient_flash'] = [
+                'error' => 'This invoice is no longer unpaid, or it could not be found.'
+            ];
+        }
+    }
+    $_SESSION['patient_flash']['open_modal'] = 'billingModal';
+    header('Location: patient.php');
+    exit;
 }
 
-
-
-
+// ==========================================
+// 4. FETCH DATA
+// ==========================================
 $billQuery = $pdo->prepare("SELECT * FROM billings WHERE user_id = :user_id ORDER BY created_at DESC");
 $billQuery->execute([':user_id' => $user_id]);
 $billings = $billQuery->fetchAll(PDO::FETCH_ASSOC);
 
 $totalOutstanding = 0.00;
+$hasPendingPayments = false;
 foreach ($billings as $b) {
-    
-    if ($b['payment_status'] === 'Unpaid' || strpos($b['payment_status'], 'Pending') !== false) {
+    if ($b['payment_status'] !== 'Paid') {
         $totalOutstanding += $b['total_amount'];
+    }
+    if (stripos($b['payment_status'], 'Pending') !== false) {
+        $hasPendingPayments = true;
     }
 }
 
@@ -492,6 +512,9 @@ $minDateOnly = $minDateObj->format('Y-m-d');
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hosplinic | Patient Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../styles/patient.css">
 
     <style>
@@ -588,7 +611,6 @@ $minDateOnly = $minDateObj->format('Y-m-d');
         .notif-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; }
         .notif-item { padding: 0.85rem 1.1rem; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 0.75rem; text-decoration: none; }
         .notif-item.unread { background-color: #f0f9ff; }
-       
         .notif-icon {
             width: 32px;
             height: 32px;
@@ -597,26 +619,8 @@ $minDateOnly = $minDateObj->format('Y-m-d');
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
-            font-size: 0.85rem;
-            font-weight: bold;
-        }
-       
-        .notif-icon--confirmed {
-            background-color: #dcfce7;
+            background: #dcfce7;
             color: #15803d;
-            border: 1px solid #86efac;
-        }
-       
-        .notif-icon--cancelled {
-            background-color: #fee2e2;
-            color: #dc2626;
-            border: 1px solid #fca5a5;
-        }
-       
-        .notif-icon--info {
-            background-color: #e0f2fe;
-            color: #0284c7;
-            border: 1px solid #7dd3fc;
         }
         .notif-content h5 { font-size: 0.85rem; color: var(--text-dark); margin-bottom: 0.2rem; font-weight: 600; }
         .notif-content p { font-size: 0.775rem; color: var(--text-body); line-height: 1.4; margin-bottom: 0.25rem; }
@@ -748,53 +752,24 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                     </svg>
                     <?php if ($unreadCount > 0): ?>
-                        <span class="notif-badge" id="notifBadge"><?= $unreadCount ?></span>
+                        <span class="notif-badge"><?= $unreadCount ?></span>
                     <?php endif; ?>
                 </button>
 
                 <div class="notif-dropdown" id="notifDropdown">
                     <div class="notif-header">
                         <h4>Notifications</h4>
-                        <span style="font-size: 0.75rem; color: var(--primary); font-weight: 600;" id="notifSubheaderCount"><?= $unreadCount ?> new</span>
+                        <span style="font-size: 0.75rem; color: var(--primary); font-weight: 600;"><?= $unreadCount ?> new</span>
                     </div>
 
                     <div class="notif-list">
                         <?php if (count($notifications) > 0): ?>
-                            <?php foreach ($notifications as $notif): 
-                                $title = strtolower($notif['title'] ?? '');
-                                $msg   = strtolower($notif['message'] ?? '');
-                                $type  = strtolower($notif['type'] ?? '');
-
-                                
-                                if (strpos($title, 'cancel') !== false || strpos($msg, 'cancel') !== false || strpos($title, 'decline') !== false) {
-                                    $alertStyle = 'notif-icon--cancelled';
-                                    $iconType = 'cancelled';
-                                } elseif (strpos($title, 'confirm') !== false || strpos($title, 'approved') !== false || strpos($title, 'paid') !== false || $type === 'confirmed') {
-                                    $alertStyle = 'notif-icon--confirmed';
-                                    $iconType = 'confirmed';
-                                } else {
-                                    $alertStyle = 'notif-icon--info';
-                                    $iconType = 'info';
-                                }
-                            ?>
+                            <?php foreach ($notifications as $notif): ?>
                                 <div class="notif-item <?= $notif['is_read'] == 0 ? 'unread' : '' ?>">
-                                    <div class="notif-icon <?= $alertStyle ?>">
-                                        <?php if ($iconType === 'confirmed'): ?>
-                                            <!-- Green Checkmark SVG -->
-                                            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
-                                            </svg>
-                                        <?php elseif ($iconType === 'cancelled'): ?>
-                                            <!-- Red X SVG -->
-                                            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12" />
-                                            </svg>
-                                        <?php else: ?>
-                                            <!-- Blue Information 'i' SVG -->
-                                            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                            </svg>
-                                        <?php endif; ?>
+                                    <div class="notif-icon">
+                                        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                        </svg>
                                     </div>
                                     <div class="notif-content">
                                         <h5><?= htmlspecialchars($notif['title']) ?></h5>
@@ -1075,7 +1050,7 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                     </div>
 
                     <div class="modal-actions" style="margin-top: 1rem;">
-                        <button type="submit" class="btn btn--primary" style="flex:1;">Confirm & Book</button>
+                        <button type="submit" class="btn btn--primary" style="flex:1;">Confirm & Book (₱500)</button>
                         <button type="button" class="btn btn--outline" data-close="bookModal">Cancel</button>
                     </div>
                 </form>
@@ -1103,7 +1078,11 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                         <strong class="billing-balance">₱<?= number_format($totalOutstanding, 2) ?></strong>
                     </div>
                     <?php if ($totalOutstanding > 0): ?>
-                        <span class="pill pill--warn" style="background:#fee2e2; color:#b91c1c;">Payment Pending</span>
+                        <?php if ($hasPendingPayments): ?>
+                            <span class="pill pill--warn" style="background:#fef3c7; color:#92400e;">Payment Verification Pending</span>
+                        <?php else: ?>
+                            <span class="pill pill--warn" style="background:#fee2e2; color:#b91c1c;">Balance Due</span>
+                        <?php endif; ?>
                     <?php else: ?>
                         <span class="pill pill--ok">All Invoices Paid</span>
                     <?php endif; ?>
@@ -1124,7 +1103,7 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                                     <div>
                                         <?php 
                                             $isPaid = ($bill['payment_status'] === 'Paid');
-                                            $isPending = (strpos($bill['payment_status'], 'Pending') !== false);
+                                            $isPending = (stripos($bill['payment_status'], 'Pending') !== false);
                                         ?>
                                         <span class="pill <?= $bill['payment_status'] === 'Paid' ? 'pill--ok' : 'pill--pending' ?>">
                                             <?= htmlspecialchars($bill['payment_status']) ?>
@@ -1294,30 +1273,11 @@ $minDateOnly = $minDateObj->format('Y-m-d');
 
         const notifBtn = document.getElementById('notifBtn');
         const notifDropdown = document.getElementById('notifDropdown');
-        const notifBadge = document.getElementById('notifBadge');
-        const notifSubheaderCount = document.getElementById('notifSubheaderCount');
 
         if (notifBtn && notifDropdown) {
             notifBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                const isOpen = notifDropdown.classList.toggle('active');
-
-                
-                if (isOpen && notifBadge && notifBadge.style.display !== 'none') {
-                    
-                    notifBadge.style.display = 'none';
-                    if (notifSubheaderCount) {
-                        notifSubheaderCount.innerText = '0 new';
-                    }
-
-                    
-                    document.querySelectorAll('.notif-item.unread').forEach(item => {
-                        item.classList.remove('unread');
-                    });
-
-                    
-                    fetch('patient.php?mark_notifs_read=1').catch(err => console.error(err));
-                }
+                notifDropdown.classList.toggle('active');
             });
 
             document.addEventListener('click', (e) => {
@@ -1464,7 +1424,7 @@ $minDateOnly = $minDateObj->format('Y-m-d');
             return `${hour}:${m} ${ampm}`;
         }
 
-        
+        // Payment Modal & Receipt Toggle
         function openPaymentModal(billId) {
             document.getElementById('payment_bill_id').value = billId;
             openModal('paymentModal');
@@ -1485,7 +1445,7 @@ $minDateOnly = $minDateObj->format('Y-m-d');
         document.getElementById('closePaymentModal').addEventListener('click', () => closeModal('paymentModal'));
         document.getElementById('cancelPaymentModal').addEventListener('click', () => closeModal('paymentModal'));
 
-        
+        // Live Dashboard Calendar
         let calendarDate = new Date();
         let selectedDayDate = new Date();
         const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -1684,6 +1644,5 @@ $minDateOnly = $minDateObj->format('Y-m-d');
     </script>
 
     <script src="../scripts/session_timeout.js"></script>
-    <script src="../scripts/session_checker.js"></script>
 </body>
 </html>

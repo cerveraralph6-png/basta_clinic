@@ -2,29 +2,6 @@
 session_start();
 require_once 'db.php';
 
-
-// ==========================================
-// PREVENT LOGGED-IN USERS FROM SEEING LANDING PAGE
-// If already logged in, redirect them directly to their portal!
-// ==========================================
-if (isset($_SESSION['user_id']) && isset($_SESSION['user_role'])) {
-    if ($_SESSION['user_role'] === 'admin') {
-        header("Location: admin/admin.php");
-        exit;
-    } elseif ($_SESSION['user_role'] === 'doctor') {
-        header("Location: doctor/doctor.php");
-        exit;
-    } elseif ($_SESSION['user_role'] === 'patient') {
-        header("Location: patient/patient.php");
-        exit;
-    }
-}
-
-// Disable browser caching for the login page
-header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
-header("Cache-Control: post-check=0, pre-check=0", false);
-header("Pragma: no-cache");
-
 // ====================================================================
 // CONFIGURE YOUR GOOGLE CLIENT ID HERE
 // ====================================================================

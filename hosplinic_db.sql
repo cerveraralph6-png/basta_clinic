@@ -3,9 +3,9 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Oct 15, 2026 at 04:39 AM
+-- Generation Time: Oct 19, 2026 at 05:48 AM
 -- Server version: 10.4.32-MariaDB
--- PHP Version: 8.0.30
+-- PHP Version: 8.2.12
 
 SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 START TRANSACTION;
@@ -72,7 +72,10 @@ CREATE TABLE `billings` (
   `lab_fee` decimal(10,2) DEFAULT 0.00,
   `lab_status` enum('none','pending','accepted','declined') DEFAULT 'none',
   `total_amount` decimal(10,2) NOT NULL,
-  `payment_status` enum('Unpaid','Paid') DEFAULT 'Unpaid',
+  `payment_status` varchar(100) DEFAULT 'Unpaid',
+  `payment_method` varchar(50) DEFAULT NULL,
+  `receipt_path` varchar(255) DEFAULT NULL,
+  `receipt_name` varchar(255) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
@@ -80,13 +83,13 @@ CREATE TABLE `billings` (
 -- Dumping data for table `billings`
 --
 
-INSERT INTO `billings` (`id`, `user_id`, `appointment_id`, `invoice_number`, `description`, `base_fee`, `lab_name`, `lab_fee`, `lab_status`, `total_amount`, `payment_status`, `created_at`) VALUES
-(7, 15, 8, 'INV-20261014-5443', 'Cancellation Penalty [HSP-2610-2838] - Ralph Cervera', 50.00, 'Complete Blood Count (CBC) & Urinalysis', 0.00, 'declined', 50.00, 'Paid', '2026-10-14 15:30:18'),
-(8, 15, 9, 'INV-20261014-9698', 'Cancellation Penalty [HSP-2610-1700] - Ralph Cervera', 50.00, 'Complete Blood Count (CBC) & Urinalysis', 0.00, 'declined', 50.00, 'Paid', '2026-10-14 15:51:13'),
-(9, 15, 10, 'INV-20261014-4359', 'Cancellation Penalty [HSP-2610-7265] - Ralph Cervera', 50.00, 'Complete Blood Count (CBC) & Urinalysis', 0.00, 'declined', 50.00, 'Paid', '2026-10-14 15:58:41'),
-(10, 15, 11, 'INV-20261014-5534', 'Cancellation Penalty [HSP-2610-2613] - Ralph Cervera', 50.00, 'Complete Blood Count (CBC) & Urinalysis', 0.00, 'declined', 50.00, 'Paid', '2026-10-14 16:35:10'),
-(11, 15, 12, 'INV-20261014-9958', 'Consultation [HSP-2610-1737] - General Medicine (Ralph Cervera)', 500.00, 'Complete Blood Count (CBC) & Urinalysis', 350.00, 'accepted', 850.00, 'Paid', '2026-10-14 16:43:55'),
-(12, 15, 13, 'INV-20261015-2973', 'Consultation [HSP-2610-4109] - General Medicine (Jansen Quinones)', 500.00, 'Complete Blood Count (CBC) & Urinalysis', 350.00, 'pending', 500.00, 'Unpaid', '2026-10-14 23:42:11');
+INSERT INTO `billings` (`id`, `user_id`, `appointment_id`, `invoice_number`, `description`, `base_fee`, `lab_name`, `lab_fee`, `lab_status`, `total_amount`, `payment_status`, `payment_method`, `receipt_path`, `receipt_name`, `created_at`) VALUES
+(7, 15, 8, 'INV-20261014-5443', 'Cancellation Penalty [HSP-2610-2838] - Ralph Cervera', 50.00, 'Complete Blood Count (CBC) & Urinalysis', 0.00, 'declined', 50.00, 'Paid', NULL, NULL, NULL, '2026-10-14 15:30:18'),
+(8, 15, 9, 'INV-20261014-9698', 'Cancellation Penalty [HSP-2610-1700] - Ralph Cervera', 50.00, 'Complete Blood Count (CBC) & Urinalysis', 0.00, 'declined', 50.00, 'Paid', NULL, NULL, NULL, '2026-10-14 15:51:13'),
+(9, 15, 10, 'INV-20261014-4359', 'Cancellation Penalty [HSP-2610-7265] - Ralph Cervera', 50.00, 'Complete Blood Count (CBC) & Urinalysis', 0.00, 'declined', 50.00, 'Paid', NULL, NULL, NULL, '2026-10-14 15:58:41'),
+(10, 15, 11, 'INV-20261014-5534', 'Cancellation Penalty [HSP-2610-2613] - Ralph Cervera', 50.00, 'Complete Blood Count (CBC) & Urinalysis', 0.00, 'declined', 50.00, 'Paid', NULL, NULL, NULL, '2026-10-14 16:35:10'),
+(11, 15, 12, 'INV-20261014-9958', 'Consultation [HSP-2610-1737] - General Medicine (Ralph Cervera)', 500.00, 'Complete Blood Count (CBC) & Urinalysis', 350.00, 'accepted', 850.00, 'Paid', NULL, NULL, NULL, '2026-10-14 16:43:55'),
+(12, 15, 13, 'INV-20261015-2973', 'Consultation [HSP-2610-4109] - General Medicine (Jansen Quinones)', 500.00, 'Complete Blood Count (CBC) & Urinalysis', 350.00, 'pending', 500.00, 'Unpaid', NULL, NULL, NULL, '2026-10-14 23:42:11');
 
 -- --------------------------------------------------------
 
@@ -196,57 +199,20 @@ CREATE TABLE `users` (
 --
 
 INSERT INTO `users` (`id`, `full_name`, `identifier`, `phone_number`, `password_hash`, `role`, `department`, `created_at`, `unavailable_count`) VALUES
-(1, 'Master Administrator', 'admin@hosplinic', '+1 800-555-0199', '$2y$10$i3EKP7XdB9jJ40yA3ENCOeFzU.azBeyLd6PabOiWHDHsBH/HS.S4W', 'admin', NULL, '2026-10-14 03:46:17', 0),
-(14, 'Ralph Cervera', 'raincee', '0912345678', '$2y$10$l4u8fC9ex17bC27j43GQfegbE31aJ3wGGk39bei3AIOclUX.AYnbe', 'doctor', 'General Medicine', '2026-10-14 15:29:23', 1),
+(1, 'Master Administrator', 'admin@hosplinic', '+1 800-555-0199', '$2y$10$oUKzx//9fnLu6OCDtYfAEOTyo6U7FA9U0RdrD1yxP5jd6gBvKfhpm', 'admin', NULL, '2026-10-14 03:46:17', 0),
+(14, 'Ralph Cervera', 'raincee', '0912345678', '$2y$10$l4u8fC9ex17bC27j43GQfegbE31aJ3wGGk39bei3AIOclUX.AYnbe', 'doctor', 'General Medicine', '2026-10-14 15:29:23', 3),
 (15, '1', '1', '1', '$2y$10$pZd2bkkw219Cau252n/G7uE9N56oYt91WPdZnsRFZD77MhQhk0Giu', 'patient', NULL, '2026-10-14 15:29:38', 0),
 (16, 'admin', 'admin', '000000', '$2y$10$kpks7tCUtAIdz/0S3WfNgOwVG/G/jIEVcKvBmrpl2.oxxbg8sOOUu', 'admin', NULL, '2026-10-14 21:39:07', 0),
-(17, 'Jansen Quinones', 'sen', '0000000', '$2y$10$u4H0lxEC5kbjfqcgWw8SquL4Wps2RBMv1sT3YBmCkN29ZKaDWlTLK', 'doctor', 'General Medicine', '2026-10-14 21:50:38', 0),
-(18, 'Ralph Cervera', 'cerveraralph6@gmail.com', '', '$2y$10$o1IhVONsORGE.kE/d8AWWuplxRMaeQmtUWTl4twWZdZ5F/eshogYi', 'patient', NULL, '2026-10-14 22:14:06', 0);
+(17, 'Jansen Quinones', 'sen', '0000000', '$2y$10$u4H0lxEC5kbjfqcgWw8SquL4Wps2RBMv1sT3YBmCkN29ZKaDWlTLK', 'doctor', 'General Medicine', '2026-10-14 21:50:38', 4),
+(18, 'Ralph Cervera', 'cerveraralph6@gmail.com', '', '$2y$10$o1IhVONsORGE.kE/d8AWWuplxRMaeQmtUWTl4twWZdZ5F/eshogYi', 'patient', NULL, '2026-10-14 22:14:06', 0),
+(19, 'b', 'b@gmail.com', '0912345678', '$2y$10$xkJCw6nPDsllAoQhfZViLOcYszYhVnqHxK0kbXUfXgx2CnpoabxXy', 'patient', NULL, '2026-10-15 08:13:22', 0),
+(20, 'John', 'marvin', '123123', '$2y$10$s.kjoOGcIGUh32IEyAiFv.T10jrPOQaOVBLLtxesVXRVrPAJxFX6q', 'doctor', 'Cardiology', '2026-10-19 03:43:38', 0),
+(21, 'Marvin', 'john', '12341234', '$2y$10$.6lQx6BGNRjGmMAkbnRuzOyXPll14hhY0e0N5bfGFqroVIeJDv6Re', 'doctor', 'Pediatrics', '2026-10-19 03:44:11', 0),
+(22, 'Christian', 'Christian', '123123123', '$2y$10$/qL6zDDbeyjZ.ddQtOBNmesmq3yL/FU2noBAN6X30Bf.nlAo4aM8S', 'doctor', 'Dermatology', '2026-10-19 03:44:32', 0);
 
 --
 -- Indexes for dumped tables
 --
-
---
--- Indexes for table `appointments`
---
-ALTER TABLE `appointments`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `booking_code` (`booking_code`),
-  ADD KEY `user_id` (`user_id`),
-  ADD KEY `fk_doctor` (`doctor_id`);
-
---
--- Indexes for table `billings`
---
-ALTER TABLE `billings`
-  ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `invoice_number` (`invoice_number`),
-  ADD KEY `user_id` (`user_id`),
-  ADD KEY `appointment_id` (`appointment_id`);
-
---
--- Indexes for table `doctor_unavailability_logs`
---
-ALTER TABLE `doctor_unavailability_logs`
-  ADD PRIMARY KEY (`id`),
-  ADD KEY `doctor_id` (`doctor_id`),
-  ADD KEY `appointment_id` (`appointment_id`);
-
---
--- Indexes for table `medical_records`
---
-ALTER TABLE `medical_records`
-  ADD PRIMARY KEY (`id`),
-  ADD KEY `patient_id` (`patient_id`),
-  ADD KEY `doctor_id` (`doctor_id`);
-
---
--- Indexes for table `notifications`
---
-ALTER TABLE `notifications`
-  ADD PRIMARY KEY (`id`),
-  ADD KEY `user_id` (`user_id`);
 
 --
 -- Indexes for table `users`
@@ -260,78 +226,10 @@ ALTER TABLE `users`
 --
 
 --
--- AUTO_INCREMENT for table `appointments`
---
-ALTER TABLE `appointments`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=14;
-
---
--- AUTO_INCREMENT for table `billings`
---
-ALTER TABLE `billings`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=13;
-
---
--- AUTO_INCREMENT for table `doctor_unavailability_logs`
---
-ALTER TABLE `doctor_unavailability_logs`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
-
---
--- AUTO_INCREMENT for table `medical_records`
---
-ALTER TABLE `medical_records`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
-
---
--- AUTO_INCREMENT for table `notifications`
---
-ALTER TABLE `notifications`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=31;
-
---
 -- AUTO_INCREMENT for table `users`
 --
 ALTER TABLE `users`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=19;
-
---
--- Constraints for dumped tables
---
-
---
--- Constraints for table `appointments`
---
-ALTER TABLE `appointments`
-  ADD CONSTRAINT `appointments_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  ADD CONSTRAINT `fk_doctor` FOREIGN KEY (`doctor_id`) REFERENCES `users` (`id`) ON DELETE SET NULL;
-
---
--- Constraints for table `billings`
---
-ALTER TABLE `billings`
-  ADD CONSTRAINT `billings_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  ADD CONSTRAINT `billings_ibfk_2` FOREIGN KEY (`appointment_id`) REFERENCES `appointments` (`id`) ON DELETE SET NULL;
-
---
--- Constraints for table `doctor_unavailability_logs`
---
-ALTER TABLE `doctor_unavailability_logs`
-  ADD CONSTRAINT `doctor_unavailability_logs_ibfk_1` FOREIGN KEY (`doctor_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  ADD CONSTRAINT `doctor_unavailability_logs_ibfk_2` FOREIGN KEY (`appointment_id`) REFERENCES `appointments` (`id`) ON DELETE CASCADE;
-
---
--- Constraints for table `medical_records`
---
-ALTER TABLE `medical_records`
-  ADD CONSTRAINT `medical_records_ibfk_1` FOREIGN KEY (`patient_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  ADD CONSTRAINT `medical_records_ibfk_2` FOREIGN KEY (`doctor_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
-
---
--- Constraints for table `notifications`
---
-ALTER TABLE `notifications`
-  ADD CONSTRAINT `notifications_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=23;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
