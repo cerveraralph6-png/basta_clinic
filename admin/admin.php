@@ -2,14 +2,15 @@
 session_start();
 require_once '../db.php';
 
+// Prevent browser from caching protected portal screens
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Cache-Control: post-check=0, pre-check=0", false);
+header("Pragma: no-cache");
+
 if (!isset($_SESSION['user_id']) || $_SESSION['user_role'] !== 'admin') {
     header("Location: ../index.php");
     exit;
 }
-
-
-
-
 
 if (isset($_POST['ajax_action']) && $_POST['ajax_action'] === 'adjust_stock') {
     header('Content-Type: application/json');
@@ -56,9 +57,7 @@ function logAdminAudit($pdo, $adminId, $action, $details) {
 if (isset($_GET['export_reports']) && $_GET['export_reports'] == '1') {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename=Clinic_Performance_Report_' . date('Y-m-d') . '.csv');
-    $output = fopen('php:
-
-    fputcsv($output, ['Doctor Name', 'Department', 'Total Consultations', 'Unavailable Strikes', 'Doctor Earnings (70%)']);
+    
 
     $repStmt = $pdo->query("
         SELECT 
@@ -323,9 +322,6 @@ $securityLogs = $secAuditStmt->fetchAll(PDO::FETCH_ASSOC);
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hosplinic | Master Admin</title>
 
-    <link rel="preconnect" href="https:
-    <link rel="preconnect" href="https:
-    <link href="https:
     <link rel="stylesheet" href="../styles/admin.css">
 
     <style>
@@ -1216,5 +1212,6 @@ $securityLogs = $secAuditStmt->fetchAll(PDO::FETCH_ASSOC);
     </script>
 
     <script src="../scripts/session_timeout.js"></script>
+    <script src="../scripts/session_checker.js"></script>
 </body>
 </html>

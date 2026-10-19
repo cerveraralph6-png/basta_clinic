@@ -1,5 +1,5 @@
 <?php
-$inactive_limit = 60; 
+$inactive_limit = 120; 
 
 if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity'] > $inactive_limit)) {
     session_unset();
