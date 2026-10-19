@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Oct 19, 2026 at 05:48 AM
+-- Generation Time: Oct 19, 2026 at 06:19 AM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -53,7 +53,23 @@ INSERT INTO `appointments` (`id`, `user_id`, `doctor_id`, `booking_code`, `depar
 (10, 15, 14, 'HSP-2610-7265', 'General Medicine', 'Ralph Cervera', '2026-10-15 23:58:00', '1', NULL, NULL, 'No reason provided by patient', 'Cancelled', '2026-10-14 15:58:41'),
 (11, 15, 14, 'HSP-2610-2613', 'General Medicine', 'Ralph Cervera', '2026-10-16 00:34:00', 'concerned about this', 'uploads/attach_6acfaf3e9d3ba.jpg', 'images.jpg', 'No reason provided by patient', 'Cancelled', '2026-10-14 16:35:10'),
 (12, 15, NULL, 'HSP-2610-1737', 'General Medicine', 'On-Duty Clinical Staff (General Medicine)', '2026-10-19 00:43:00', 'illness', NULL, NULL, 'No reason provided by patient', 'Cancelled', '2026-10-14 16:43:55'),
-(13, 15, 17, 'HSP-2610-4109', 'General Medicine', 'Jansen Quinones', '2026-10-20 13:00:00', '1', 'uploads/attach_6ad0135370e84.jpg', 'images.jpg', NULL, 'Confirmed', '2026-10-14 23:42:11');
+(13, 15, 17, 'HSP-2610-4109', 'General Medicine', 'Jansen Quinones', '2026-10-20 13:00:00', '1', 'uploads/attach_6ad0135370e84.jpg', 'images.jpg', NULL, 'Confirmed', '2026-10-14 23:42:11'),
+(0, 23, 20, 'HSP-2610-2336', 'Cardiology', 'John', '2026-10-22 09:00:00', '', NULL, NULL, NULL, 'Pending', '2026-10-19 03:57:13');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `audit_logs`
+--
+
+CREATE TABLE `audit_logs` (
+  `id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL,
+  `action` varchar(100) NOT NULL,
+  `details` text DEFAULT NULL,
+  `ip_address` varchar(45) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
 
@@ -89,7 +105,8 @@ INSERT INTO `billings` (`id`, `user_id`, `appointment_id`, `invoice_number`, `de
 (9, 15, 10, 'INV-20261014-4359', 'Cancellation Penalty [HSP-2610-7265] - Ralph Cervera', 50.00, 'Complete Blood Count (CBC) & Urinalysis', 0.00, 'declined', 50.00, 'Paid', NULL, NULL, NULL, '2026-10-14 15:58:41'),
 (10, 15, 11, 'INV-20261014-5534', 'Cancellation Penalty [HSP-2610-2613] - Ralph Cervera', 50.00, 'Complete Blood Count (CBC) & Urinalysis', 0.00, 'declined', 50.00, 'Paid', NULL, NULL, NULL, '2026-10-14 16:35:10'),
 (11, 15, 12, 'INV-20261014-9958', 'Consultation [HSP-2610-1737] - General Medicine (Ralph Cervera)', 500.00, 'Complete Blood Count (CBC) & Urinalysis', 350.00, 'accepted', 850.00, 'Paid', NULL, NULL, NULL, '2026-10-14 16:43:55'),
-(12, 15, 13, 'INV-20261015-2973', 'Consultation [HSP-2610-4109] - General Medicine (Jansen Quinones)', 500.00, 'Complete Blood Count (CBC) & Urinalysis', 350.00, 'pending', 500.00, 'Unpaid', NULL, NULL, NULL, '2026-10-14 23:42:11');
+(12, 15, 13, 'INV-20261015-2973', 'Consultation [HSP-2610-4109] - General Medicine (Jansen Quinones)', 500.00, 'Complete Blood Count (CBC) & Urinalysis', 350.00, 'pending', 500.00, 'Unpaid', NULL, NULL, NULL, '2026-10-14 23:42:11'),
+(0, 23, 0, 'INV-20261019-2621', 'Consultation [HSP-2610-2336] - Cardiology (John)', 500.00, '12-Lead ECG & Cardiac Biomarker Panel', 650.00, 'pending', 500.00, 'Paid', 'Onsite Payment', NULL, NULL, '2026-10-19 03:57:13');
 
 -- --------------------------------------------------------
 
@@ -174,7 +191,11 @@ INSERT INTO `notifications` (`id`, `user_id`, `title`, `message`, `type`, `is_re
 (27, 1, 'Doctor Unavailability Alert', 'Incident Alert: Ralph Cervera declared unavailable for booking [HSP-2610-1737]. Reassigned to On-Duty Clinical Staff (General Medicine). (Total Doctor Strikes: 1). Reason: Emergency Procedure / Surgery', 'comment', 0, '2026-10-14 21:37:08'),
 (28, 15, 'Physician Reassigned', 'Dr. Ralph Cervera was unavailable for booking [HSP-2610-1737]. You have been successfully reassigned to On-Duty Clinical Staff (General Medicine).', 'reminder', 0, '2026-10-14 21:37:08'),
 (29, 15, 'Appointment Submitted (Pending)', 'Your consultation with Jansen Quinones is Pending doctor confirmation. Reference: HSP-2610-4109.', 'reminder', 0, '2026-10-14 23:42:11'),
-(30, 15, 'Appointment Confirmed', 'Dr. Jansen Quinones confirmed your consultation [HSP-2610-4109]. We look forward to seeing you!', 'confirmed', 0, '2026-10-14 23:53:43');
+(30, 15, 'Appointment Confirmed', 'Dr. Jansen Quinones confirmed your consultation [HSP-2610-4109]. We look forward to seeing you!', 'confirmed', 0, '2026-10-14 23:53:43'),
+(0, 23, 'Appointment Submitted (Pending)', 'Your consultation with John is Pending doctor confirmation. Reference: HSP-2610-2336.', 'reminder', 0, '2026-10-19 03:57:13'),
+(0, 1, 'New Payment Submission', 'Patient submitted a payment via Onsite Payment for Invoice #0. Please verify.', 'reminder', 0, '2026-10-19 03:57:17'),
+(0, 16, 'New Payment Submission', 'Patient submitted a payment via Onsite Payment for Invoice #0. Please verify.', 'reminder', 0, '2026-10-19 03:57:17'),
+(0, 23, 'Payment Verified & Confirmed', 'Your payment for invoice [INV-20261019-2621] has been verified and marked as Paid by Administration.', 'confirmed', 0, '2026-10-19 03:57:35');
 
 -- --------------------------------------------------------
 
@@ -208,11 +229,18 @@ INSERT INTO `users` (`id`, `full_name`, `identifier`, `phone_number`, `password_
 (19, 'b', 'b@gmail.com', '0912345678', '$2y$10$xkJCw6nPDsllAoQhfZViLOcYszYhVnqHxK0kbXUfXgx2CnpoabxXy', 'patient', NULL, '2026-10-15 08:13:22', 0),
 (20, 'John', 'marvin', '123123', '$2y$10$s.kjoOGcIGUh32IEyAiFv.T10jrPOQaOVBLLtxesVXRVrPAJxFX6q', 'doctor', 'Cardiology', '2026-10-19 03:43:38', 0),
 (21, 'Marvin', 'john', '12341234', '$2y$10$.6lQx6BGNRjGmMAkbnRuzOyXPll14hhY0e0N5bfGFqroVIeJDv6Re', 'doctor', 'Pediatrics', '2026-10-19 03:44:11', 0),
-(22, 'Christian', 'Christian', '123123123', '$2y$10$/qL6zDDbeyjZ.ddQtOBNmesmq3yL/FU2noBAN6X30Bf.nlAo4aM8S', 'doctor', 'Dermatology', '2026-10-19 03:44:32', 0);
+(22, 'Christian', 'Christian', '123123123', '$2y$10$/qL6zDDbeyjZ.ddQtOBNmesmq3yL/FU2noBAN6X30Bf.nlAo4aM8S', 'doctor', 'Dermatology', '2026-10-19 03:44:32', 0),
+(23, 'John Marvin Vicente', 'johnvictus1@gmail.com', '', '$2y$10$HpMVJ.2d7.7AXOKivGFd4.7QjR0fAq8C/HVCD.uhPNP6FamL0.aAm', 'patient', NULL, '2026-10-19 03:57:04', 0);
 
 --
 -- Indexes for dumped tables
 --
+
+--
+-- Indexes for table `audit_logs`
+--
+ALTER TABLE `audit_logs`
+  ADD PRIMARY KEY (`id`);
 
 --
 -- Indexes for table `users`
@@ -226,10 +254,16 @@ ALTER TABLE `users`
 --
 
 --
+-- AUTO_INCREMENT for table `audit_logs`
+--
+ALTER TABLE `audit_logs`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
 -- AUTO_INCREMENT for table `users`
 --
 ALTER TABLE `users`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=23;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=24;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
