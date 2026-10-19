@@ -2,7 +2,7 @@
 session_start();
 require_once '../db.php';
 
-// Prevent browser from caching protected portal screens
+
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
@@ -153,7 +153,7 @@ class PrescriptionPDF
     }
 }
 
-// 1. CONFIRM APPOINTMENT
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'confirm_appointment') {
     $confirm_apt_id = intval($_POST['appointment_id'] ?? 0);
 
@@ -177,7 +177,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// 2. PASS PATIENT / UNAVAILABILITY
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'complete_appointment') {
+    $complete_apt_id = intval($_POST['appointment_id'] ?? 0);
+
+    $finishStmt = $pdo->prepare("
+        UPDATE appointments 
+        SET status = 'Completed' 
+        WHERE id = :id AND doctor_id = :doc_id
+    ");
+    $finishStmt->execute([':id' => $complete_apt_id, ':doc_id' => $doctor_id]);
+
+    $aptData = $pdo->prepare("SELECT user_id, booking_code FROM appointments WHERE id = :id");
+    $aptData->execute([':id' => $complete_apt_id]);
+    $aptRow = $aptData->fetch(PDO::FETCH_ASSOC);
+
+    if ($aptRow) {
+        $code = $aptRow['booking_code'] ?? ('#' . $complete_apt_id);
+        $notif = $pdo->prepare("INSERT INTO notifications (user_id, title, message, type) VALUES (:uid, 'Consultation Completed', :msg, 'confirmed')");
+        $notif->execute([
+            ':uid' => $aptRow['user_id'],
+            ':msg' => "Dr. $doctor_name has concluded your consultation [$code]. Your medical files and summaries are now ready in your records."
+        ]);
+        $upload_msg = "Consultation [$code] was marked as Completed and moved to patient history.";
+        $auto_open_queue_modal = true;
+    }
+}
+
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'pass_patient') {
     $apt_id = intval($_POST['appointment_id'] ?? 0);
     $unavail_reason = trim($_POST['unavail_reason'] ?? 'Doctor declared unavailable');
@@ -243,7 +270,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// 3. UPLOAD DIAGNOSIS / MEDICAL RECORD
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'upload_record') {
     $booking_code    = trim($_POST['booking_code'] ?? '');
     $title           = trim($_POST['title'] ?? '');
@@ -308,7 +335,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// 4. ISSUE E-PRESCRIPTION (WITH ONE-TIME SIGNATURE & PDF GENERATION)
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'issue_prescription') {
     $booking_code        = trim($_POST['rx_booking_code'] ?? '');
     $medication_name     = trim($_POST['medication_name'] ?? '');
@@ -349,6 +376,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 ':mname'        => $medication_name,
                 ':instructions' => $dosage_instructions
             ]);
+
+            
+            $completeAptStmt = $pdo->prepare("
+                UPDATE appointments 
+                SET status = 'Completed' 
+                WHERE id = :aid AND doctor_id = :did
+            ");
+            $completeAptStmt->execute([':aid' => $appointment_id, ':did' => $doctor_id]);
 
             $sigJpegData = base64_decode(preg_replace('#^data:image/\w+;base64,#i', '', $signature_data));
             $sigW = 460;
@@ -416,18 +451,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// Fetch Notifications
+
 $docNotifStmt = $pdo->prepare("SELECT * FROM notifications WHERE user_id = :doctor_id ORDER BY created_at DESC LIMIT 6");
 $docNotifStmt->execute([':doctor_id' => $doctor_id]);
 $doctorNotifications = $docNotifStmt->fetchAll(PDO::FETCH_ASSOC);
 $unreadDocCount = count(array_filter($doctorNotifications, fn($dn) => $dn['is_read'] == 0));
 
-// Fetch Current Active Queue (Pending or Confirmed today / upcoming)
+
 $queueStmt = $pdo->prepare("
     SELECT a.*, u.full_name AS patient_name, u.phone_number 
     FROM appointments a
     JOIN users u ON a.user_id = u.id
-    WHERE a.doctor_id = :doctor_id AND a.status != 'Cancelled'
+    
+    WHERE a.doctor_id = :doctor_id AND a.status NOT IN ('Cancelled', 'Completed')
     ORDER BY a.appointment_datetime ASC
 ");
 $queueStmt->execute([':doctor_id' => $doctor_id]);
@@ -442,9 +478,9 @@ foreach ($doctorQueue as $q) {
     }
 }
 
-// ==========================================
-// 5. FETCH ALL COMPLETED PATIENTS & MEDICAL RECORDS
-// ==========================================
+
+
+
 $historyStmt = $pdo->prepare("
     SELECT a.*, 
            u.full_name AS patient_name, 
@@ -452,13 +488,14 @@ $historyStmt = $pdo->prepare("
            u.identifier AS patient_email
     FROM appointments a
     JOIN users u ON a.user_id = u.id
-    WHERE a.doctor_id = :doctor_id AND a.status = 'Confirmed'
+    
+    WHERE a.doctor_id = :doctor_id AND a.status = 'Completed'
     ORDER BY a.appointment_datetime DESC
 ");
 $historyStmt->execute([':doctor_id' => $doctor_id]);
 $completedAppointments = $historyStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Attach documents, prescriptions, and diagnosis records for each completed consultation
+
 foreach ($completedAppointments as &$apt) {
     $recQuery = $pdo->prepare("
         SELECT id, title, diagnosis_notes, file_name, file_path, file_size, created_at 
@@ -488,25 +525,25 @@ unset($apt);
     <link rel="stylesheet" href="../styles/doctor.css">
 
     <style>
-.alert { 
-    padding: 0.75rem 1rem; 
-    border-radius: var(--radius-md, 8px); 
-    font-size: 0.875rem; 
-    margin-bottom: 1.5rem; 
-    opacity: 1;
-    transition: opacity 0.6s ease, transform 0.6s ease, margin-bottom 0.6s ease, padding 0.6s ease;
-}
+    .alert { 
+        padding: 0.75rem 1rem; 
+        border-radius: var(--radius-md, 8px); 
+        font-size: 0.875rem; 
+        margin-bottom: 1.5rem; 
+        opacity: 1;
+        transition: opacity 0.6s ease, transform 0.6s ease, margin-bottom 0.6s ease, padding 0.6s ease;
+    }
 
-.alert--fade-out {
-    opacity: 0;
-    transform: translateY(-8px);
-    margin-bottom: 0 !important;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-    height: 0 !important;
-    overflow: hidden;
-    pointer-events: none;
-}
+    .alert--fade-out {
+        opacity: 0;
+        transform: translateY(-8px);
+        margin-bottom: 0 !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        height: 0 !important;
+        overflow: hidden;
+        pointer-events: none;
+    }
         .alert--error { background-color: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
         .alert--success { background-color: #dcfce7; color: #15803d; border: 1px solid #86efac; }
         
@@ -655,7 +692,7 @@ unset($apt);
         }
         .btn-rx-quick:hover { background: #6d28d9; }
 
-        /* Search & History UI */
+       
         .search-box-wrapper {
             display: flex;
             gap: 0.75rem;
@@ -967,6 +1004,15 @@ unset($apt);
                                         >
                                             &#9776; Rx Only
                                         </button>
+
+                                        <!-- Complete & Clear from Queue Button -->
+                                        <form action="doctor.php" method="POST" style="margin: 0;" onsubmit="return confirm('Conclude consultation and archive this patient?');">
+                                            <input type="hidden" name="action" value="complete_appointment">
+                                            <input type="hidden" name="appointment_id" value="<?= $queue['id'] ?>">
+                                            <button type="submit" class="btn btn--outline" style="padding: 0.45rem 0.75rem; font-size: 0.8rem; color: #15803d; border-color: #86efac; font-weight: 600; white-space: nowrap;">
+                                                &#10003; Mark Completed
+                                            </button>
+                                        </form>
                                     <?php else: ?>
                                         <!-- Shown when Pending: Doctor MUST approve first -->
                                         <form action="doctor.php" method="POST" style="margin: 0;">
@@ -1307,9 +1353,9 @@ unset($apt);
             directToRx(bcode);
         }
 
-        // ==========================================
-        // HISTORY SEARCH & SORT ENGINE
-        // ==========================================
+        
+        
+        
         function filterHistoryCards() {
             const query = document.getElementById('historySearchInput').value.toLowerCase().trim();
             const cards = document.querySelectorAll('.history-card');
@@ -1360,9 +1406,9 @@ unset($apt);
             cards.forEach(card => container.appendChild(card));
         }
 
-        // ==========================================
-        // VIEW COMPLETED PATIENT DETAIL DOSSIER
-        // ==========================================
+        
+        
+        
         function viewHistoryDetails(data) {
             const body = document.getElementById('historyDetailsBody');
             const bCode = data.booking_code || ('#' + data.id);
@@ -1445,9 +1491,9 @@ unset($apt);
             openModal('historyDetailsModal');
         }
 
-        // ==========================================
-        // MODAL TOGGLING
-        // ==========================================
+        
+        
+        
         function openModal(id) {
             const modal = document.getElementById(id);
             if (modal) {
@@ -1479,7 +1525,7 @@ unset($apt);
         document.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', () => closeModal(btn.getAttribute('data-close'))));
         document.querySelectorAll('.modal-overlay').forEach(overlay => overlay.addEventListener('click', (e) => { if(e.target === overlay) closeModal(overlay.id); }));
 
-        // Signature Pad
+        
         const canvas = document.getElementById('sigCanvas');
         const ctx = canvas ? canvas.getContext('2d') : null;
         let isDrawing = false;
@@ -1580,17 +1626,17 @@ unset($apt);
             });
         <?php endif; ?>
 
-// Auto fade-out alerts after 3.5 seconds
+
         document.addEventListener('DOMContentLoaded', () => {
             const alerts = document.querySelectorAll('.alert');
             if (alerts.length > 0) {
                 setTimeout(() => {
                     alerts.forEach(alert => {
                         alert.classList.add('alert--fade-out');
-                        // Remove from DOM entirely once animation completes
+                        
                         setTimeout(() => alert.remove(), 600);
                     });
-                }, 3500); // Wait 3.5 seconds before starting fade
+                }, 3500); 
             }
         });
     </script>

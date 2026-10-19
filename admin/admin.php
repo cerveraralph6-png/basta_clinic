@@ -2,7 +2,7 @@
 session_start();
 require_once '../db.php';
 
-// Prevent browser from caching protected portal screens
+
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
@@ -199,28 +199,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'verify_payment') {
-    $bill_id = intval($_POST['bill_id'] ?? 0);
-    
-    $payStmt = $pdo->prepare("UPDATE billings SET payment_status = 'Paid' WHERE id = :id");
-    $payStmt->execute([':id' => $bill_id]);
+    $bill_id     = intval($_POST['bill_id'] ?? 0);
+    $receipt_no  = trim($_POST['official_receipt_no'] ?? '');
+    $pay_method  = trim($_POST['payment_method'] ?? 'Cash');
 
-    $bInfo = $pdo->prepare("SELECT user_id, invoice_number FROM billings WHERE id = :id");
-    $bInfo->execute([':id' => $bill_id]);
-    $billRow = $bInfo->fetch(PDO::FETCH_ASSOC);
-
-    if ($billRow) {
-        logAdminAudit($pdo, $admin_id, 'PAYMENT_VERIFIED', "Verified payment for invoice {$billRow['invoice_number']}");
-        $notif = $pdo->prepare("
-            INSERT INTO notifications (user_id, title, message, type)
-            VALUES (:uid, 'Payment Verified & Confirmed', :msg, 'confirmed')
+    if (empty($receipt_no)) {
+        $staff_error = "Please provide an Official Clinic Receipt Number (OR Number) to credit this payment.";
+    } else {
+        $payStmt = $pdo->prepare("
+            UPDATE billings 
+            SET payment_status = 'Paid',
+                payment_method = :method,
+                official_receipt_no = :receipt_no
+            WHERE id = :id
         ");
-        $notif->execute([
-            ':uid' => $billRow['user_id'],
-            ':msg' => "Your payment for invoice [{$billRow['invoice_number']}] has been verified and marked as Paid by Administration."
+        $payStmt->execute([
+            ':method'     => $pay_method,
+            ':receipt_no' => $receipt_no,
+            ':id'         => $bill_id
         ]);
+
+        $bInfo = $pdo->prepare("SELECT user_id, invoice_number, total_amount FROM billings WHERE id = :id");
+        $bInfo->execute([':id' => $bill_id]);
+        $billRow = $bInfo->fetch(PDO::FETCH_ASSOC);
+
+        if ($billRow) {
+            logAdminAudit($pdo, $admin_id, 'PAYMENT_CREDITED', "Credited ₱{$billRow['total_amount']} for invoice {$billRow['invoice_number']} (OR #: $receipt_no)");
+            $notif = $pdo->prepare("
+                INSERT INTO notifications (user_id, title, message, type)
+                VALUES (:uid, 'Payment Credited', :msg, 'confirmed')
+            ");
+            $notif->execute([
+                ':uid' => $billRow['user_id'],
+                ':msg' => "Payment of ₱" . number_format($billRow['total_amount'], 2) . " for invoice [{$billRow['invoice_number']}] has been confirmed and credited by Administration. Official Receipt #: $receipt_no."
+            ]);
+        }
+        
+        $staff_msg = "Payment for invoice [{$billRow['invoice_number']}] credited successfully under OR #$receipt_no!";
     }
-    
-    $staff_msg = "Payment verified successfully!";
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'reject_payment') {
@@ -235,11 +251,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
 
 $pendingBillsStmt = $pdo->query("
-    SELECT b.*, u.full_name AS patient_name 
+    SELECT b.*, u.full_name AS patient_name, u.phone_number 
     FROM billings b
     JOIN users u ON b.user_id = u.id
-    WHERE b.payment_status REGEXP 'Pending'
-    ORDER BY b.created_at ASC
+    WHERE b.payment_status != 'Paid'
+    ORDER BY b.created_at DESC
 ");
 $pendingPayments = $pendingBillsStmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -938,52 +954,70 @@ $securityLogs = $secAuditStmt->fetchAll(PDO::FETCH_ASSOC);
     </div>
 
     <!-- MODAL 4: PAYMENT VERIFICATION -->
+    <!-- MODAL 4: PAYMENT VERIFICATION & CASHIER CREDIT -->
     <div class="modal-overlay" id="paymentVerifyModal" aria-hidden="true">
         <div class="modal modal--wide">
             <div class="modal__header">
-                <h3>Pending Payment Verifications</h3>
+                <h3>Cashier Desk: Verify &amp; Credit Patient Payments</h3>
                 <button class="modal__close" data-close="paymentVerifyModal">&times;</button>
             </div>
             <div class="modal__body">
+                <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">
+                    Pre-payment is disabled for online bookings. Enter the <strong>Official Receipt (OR) Number</strong> issued at the clinic desk to mark invoices as Paid and credit the patient's record.
+                </p>
+
                 <div class="list-container">
                     <?php if (count($pendingPayments) > 0): ?>
                         <?php foreach ($pendingPayments as $pay): ?>
                             <div class="list-item" style="display: flex; justify-content: space-between; align-items: center; padding: 1rem; border-bottom: 1px solid var(--border-subtle); flex-wrap: wrap; gap: 1rem;">
-                                <div>
-                                    <strong><?= htmlspecialchars($pay['patient_name']) ?></strong> &bull; <?= htmlspecialchars($pay['invoice_number']) ?>
-                                    <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0.2rem 0;">
-                                        Method: <strong><?= htmlspecialchars($pay['payment_method'] ?? 'Online') ?></strong> | Amount: <strong>₱<?= number_format($pay['total_amount'], 2) ?></strong>
+                                <div style="flex: 1; min-width: 250px;">
+                                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                                        <code class="booking-code-badge"><?= htmlspecialchars($pay['invoice_number']) ?></code>
+                                        <span class="pill pill--pending">₱<?= number_format($pay['total_amount'], 2) ?> Unpaid</span>
+                                    </div>
+                                    <h4 style="margin: 0.2rem 0;"><?= htmlspecialchars($pay['patient_name']) ?> &bull; <?= htmlspecialchars($pay['phone_number'] ?? 'N/A') ?></h4>
+                                    <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0;">
+                                        <?= htmlspecialchars($pay['description']) ?> &bull; Created: <?= date('M d, Y', strtotime($pay['created_at'])) ?>
                                     </p>
-                                    <?php if (!empty($pay['receipt_path'])): ?>
-                                        <a href="../<?= htmlspecialchars($pay['receipt_path']) ?>" target="_blank" class="btn btn--outline" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; margin-top: 0.3rem;">
-                                            &#128206; View Attached Receipt (<?= htmlspecialchars($pay['receipt_name']) ?>)
-                                        </a>
-                                    <?php else: ?>
-                                        <span style="font-size: 0.75rem; color: #b45309;">(On-site cash/check payment pending at clinic desk)</span>
-                                    <?php endif; ?>
                                 </div>
-                                <div style="display:flex; gap:0.4rem;">
-                                    <form action="admin.php" method="POST" style="margin: 0;">
-                                        <input type="hidden" name="action" value="verify_payment">
-                                        <input type="hidden" name="bill_id" value="<?= $pay['id'] ?>">
-                                        <button type="submit" class="btn btn--primary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">
-                                            &#10003; Confirm Payment
-                                        </button>
-                                    </form>
-                                    <form action="admin.php" method="POST" style="margin: 0;">
-                                        <input type="hidden" name="action" value="reject_payment">
-                                        <input type="hidden" name="bill_id" value="<?= $pay['id'] ?>">
-                                        <button type="submit" class="btn btn--outline" style="padding: 0.4rem 0.8rem; font-size: 0.8rem; color: #dc2626; border-color: #fca5a5;">
-                                            &#10005; Reject
-                                        </button>
-                                    </form>
-                                </div>
+
+                                <!-- Form to Enter OR # and Confirm Payment -->
+                                <form action="admin.php" method="POST" style="display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin: 0;">
+                                    <input type="hidden" name="action" value="verify_payment">
+                                    <input type="hidden" name="bill_id" value="<?= $pay['id'] ?>">
+
+                                    <div>
+                                        <label style="font-size: 0.725rem; font-weight: 600; display: block; margin-bottom: 0.2rem;">Payment Method</label>
+                                        <select name="payment_method" style="padding: 0.45rem 0.6rem; font-size: 0.8rem; border: 1px solid var(--border-subtle); border-radius: 4px;" required>
+                                            <option value="Cash">Cash (Onsite)</option>
+                                            <option value="GCash">GCash</option>
+                                            <option value="Maya">Maya</option>
+                                            <option value="Card">Credit / Debit Card</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label style="font-size: 0.725rem; font-weight: 600; display: block; margin-bottom: 0.2rem;">Official Receipt (OR) # <span style="color:#dc2626;">*</span></label>
+                                        <input 
+                                            type="text" 
+                                            name="official_receipt_no" 
+                                            placeholder="e.g. OR-84920" 
+                                            required 
+                                            style="padding: 0.45rem 0.65rem; font-size: 0.8rem; border: 1px solid var(--border-subtle); border-radius: 4px; width: 140px;"
+                                        >
+                                    </div>
+
+                                    <button type="submit" class="btn btn--primary" style="padding: 0.45rem 0.85rem; font-size: 0.8rem; white-space: nowrap;">
+                                        &#10003; Credit Payment
+                                    </button>
+                                </form>
                             </div>
                         <?php endforeach; ?>
                     <?php else: ?>
-                        <p style="text-align: center; color: var(--text-muted); padding: 2rem 0;">No pending payments to verify.</p>
+                        <p style="text-align: center; color: var(--text-muted); padding: 2rem 0;">All patient balances are currently settled.</p>
                     <?php endif; ?>
                 </div>
+
                 <div class="modal-actions" style="margin-top: 1.5rem;">
                     <button class="btn btn--outline" data-close="paymentVerifyModal">Close</button>
                 </div>

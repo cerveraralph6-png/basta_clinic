@@ -2,7 +2,7 @@
 session_start();
 require_once '../db.php';
 
-// Prevent browser from caching protected portal screens
+
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
@@ -1094,7 +1094,7 @@ $minDateOnly = $minDateObj->format('Y-m-d');
             </div>
             <div class="modal__body">
                 <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 0.85rem 1rem; border-radius: var(--radius-md); font-size: 0.85rem; color: #166534; margin-bottom: 1.25rem;">
-                    &#128197; <strong>Flexible Payment Policy:</strong> Payments can be made after your consultation date or hour. Pre-payment is completely optional.
+                    &#128197; <strong>Payment Policy:</strong> Payments can be made after your consultation date or hour.
                 </div>
 
                 <div class="billing-summary-box">
@@ -1161,16 +1161,18 @@ $minDateOnly = $minDateObj->format('Y-m-d');
                             <?php endif; ?>
 
                             <!-- Payment Action Button -->
-                            <?php if ($bill['payment_status'] === 'Unpaid'): ?>
-                                <button type="button" onclick="openPaymentModal(<?= $bill['id'] ?>)" class="btn btn--primary" style="width: 100%; padding: 0.5rem;">
-                                    Pay Balance
-                                </button>
-                            <?php elseif ($isPending): ?>
-                                <span class="pill pill--pending" style="display:block; text-align:center; padding:0.4rem;">
-                                    Awaiting Admin Verification
-                                </span>
+                            <!-- Post-Consultation Payment Info -->
+                            <?php if ($bill['payment_status'] === 'Paid'): ?>
+                                <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.775rem; color: #166534; display: flex; justify-content: space-between; align-items: center;">
+                                    <span>&#10003; <strong>Paid &amp; Credited</strong></span>
+                                    <span>OR #: <strong><?= htmlspecialchars($bill['official_receipt_no'] ?? 'N/A') ?></strong></span>
+                                </div>
+                            <?php else: ?>
+                                <div style="background: #f8fafc; border: 1px dashed #cbd5e1; padding: 0.65rem 0.85rem; border-radius: 6px; font-size: 0.775rem; color: #475569; text-align: center;">
+                                    &#128179; <strong>Post-Consultation Settlement:</strong> Please settle this balance at the clinic cashier after your visit. Our admin will verify your payment and issue your Official Receipt.
+                                </div>
                             <?php endif; ?>
-                        </div>
+                            </div>
                     <?php endforeach; ?>
                 <?php else: ?>
                     <p style="text-align: center; color: var(--text-muted); font-size: 0.85rem; padding: 2rem 0;">No invoices generated yet.</p>

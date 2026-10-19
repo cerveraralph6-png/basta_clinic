@@ -3,10 +3,10 @@ session_start();
 require_once 'db.php';
 
 
-// ==========================================
-// PREVENT LOGGED-IN USERS FROM SEEING LANDING PAGE
-// If already logged in, redirect them directly to their portal!
-// ==========================================
+
+
+
+
 if (isset($_SESSION['user_id']) && isset($_SESSION['user_role'])) {
     if ($_SESSION['user_role'] === 'admin') {
         header("Location: admin/admin.php");
@@ -20,23 +20,23 @@ if (isset($_SESSION['user_id']) && isset($_SESSION['user_role'])) {
     }
 }
 
-// Disable browser caching for the login page
+
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
 
-// ====================================================================
-// CONFIGURE YOUR GOOGLE CLIENT ID HERE
-// ====================================================================
+
+
+
 $google_client_id = '400820330228-fobmbu7882pm3dd393vv0dpe43735rpm.apps.googleusercontent.com';
 
 $auth_error = '';
 $auth_success = '';
 $open_modal_on_load = ''; 
 
-// ==========================================
-// 1. HANDLE CONFIRMED GOOGLE REGISTRATION
-// ==========================================
+
+
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'confirm_google_register') {
     if (isset($_SESSION['pending_google_user'])) {
         $name  = $_SESSION['pending_google_user']['name'];
@@ -68,9 +68,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// ==========================================
-// 2. HANDLE GOOGLE SIGN-IN / SIGN-UP (JWT)
-// ==========================================
+
+
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'google_login') {
     $jwt = $_POST['credential'] ?? '';
     $auth_source = $_POST['auth_source'] ?? 'login';
@@ -141,9 +141,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// ==========================================
-// 3. HANDLE MANUAL REGISTRATION
-// ==========================================
+
+
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'register') {
     $fullName        = trim($_POST['fullName'] ?? '');
     $identifier      = trim($_POST['identifier'] ?? '');
@@ -194,14 +194,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// ==========================================
-// 4. HANDLE MANUAL LOGIN
-// ==========================================
+
+
+
+
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'login') {
     $loginIdentifier = trim($_POST['loginIdentifier'] ?? '');
     $loginPassword   = $_POST['loginPassword'] ?? '';
+    $userIp          = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 
-    if (empty($loginIdentifier) || empty($loginPassword)) {
+    
+    $maxAttempts   = 5;
+    $lockoutWindow = 15 * 60; 
+    $currentTime   = time();
+
+    
+    $checkThrottling = $pdo->prepare("
+        SELECT attempts, last_attempt 
+        FROM login_attempts 
+        WHERE ip_address = :ip AND identifier = :ident 
+        LIMIT 1
+    ");
+    $checkThrottling->execute([
+        ':ip'    => $userIp,
+        ':ident' => $loginIdentifier
+    ]);
+    $throttle = $checkThrottling->fetch(PDO::FETCH_ASSOC);
+
+    
+    if ($throttle && $throttle['attempts'] >= $maxAttempts && ($currentTime - $throttle['last_attempt']) < $lockoutWindow) {
+        $remainingSeconds = $lockoutWindow - ($currentTime - $throttle['last_attempt']);
+        $remainingMinutes = ceil($remainingSeconds / 60);
+
+        $auth_error = "Too many failed login attempts. For security reasons, this account is temporarily locked for {$remainingMinutes} minute(s).";
+        $open_modal_on_load = 'loginModal';
+    } elseif (empty($loginIdentifier) || empty($loginPassword)) {
         $auth_error = "Please enter both identifier and password.";
         $open_modal_on_load = 'loginModal';
     } else {
@@ -210,10 +238,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $user = $stmt->fetch();
 
         if ($user && password_verify($loginPassword, $user['password_hash'])) {
+            
+            $clearAttempts = $pdo->prepare("DELETE FROM login_attempts WHERE ip_address = :ip AND identifier = :ident");
+            $clearAttempts->execute([
+                ':ip'    => $userIp,
+                ':ident' => $loginIdentifier
+            ]);
+
+            
             $_SESSION['user_id']   = $user['id'];
             $_SESSION['user_name'] = $user['full_name'];
             $_SESSION['user_role'] = $user['role'];
 
+            
             if ($user['role'] === 'admin') {
                 header("Location: admin/admin.php");
                 exit;
@@ -225,15 +262,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 exit;
             }
         } else {
-            $auth_error = "Invalid Email/Username or Password.";
+            
+            if ($throttle) {
+                
+                $newAttempts = (($currentTime - $throttle['last_attempt']) > $lockoutWindow) ? 1 : ($throttle['attempts'] + 1);
+
+                $updateAttempts = $pdo->prepare("
+                    UPDATE login_attempts 
+                    SET attempts = :att, last_attempt = :t 
+                    WHERE ip_address = :ip AND identifier = :ident
+                ");
+                $updateAttempts->execute([
+                    ':att'   => $newAttempts,
+                    ':t'     => $currentTime,
+                    ':ip'    => $userIp,
+                    ':ident' => $loginIdentifier
+                ]);
+                $attemptsUsed = $newAttempts;
+            } else {
+                $insertAttempt = $pdo->prepare("
+                    INSERT INTO login_attempts (ip_address, identifier, attempts, last_attempt) 
+                    VALUES (:ip, :ident, 1, :t)
+                ");
+                $insertAttempt->execute([
+                    ':ip'    => $userIp,
+                    ':ident' => $loginIdentifier,
+                    ':t'     => $currentTime
+                ]);
+                $attemptsUsed = 1;
+            }
+
+            $remainingTries = max(0, $maxAttempts - $attemptsUsed);
+
+            if ($remainingTries > 0) {
+                $auth_error = "Invalid Email/Username or Password." . " ({$remainingTries} attempt(s) remaining before 15-min lockout).";
+            } else {
+                $auth_error = "Too many failed attempts. Your account has been temporarily locked out for 15 minutes.";
+            }
+
             $open_modal_on_load = 'loginModal';
         }
     }
 }
 
-// ==========================================
-// 5. FETCH DOCTOR AVAILABILITY SCHEDULES
-// ==========================================
+
+
+
 $docScheduleStmt = $pdo->prepare("
     SELECT id, full_name, department, phone_number 
     FROM users 
@@ -264,17 +338,27 @@ function getDoctorShift($dept) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hosplinic Management System</title>
-    
-    <!-- Properly Formatted Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    
-    <link rel="stylesheet" href="styles/index.css">
-    
-    <!-- Google Identity Services Library -->
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
 
+    <!--
+            
+    <link rel="preconnect" href="//fonts.googleapis.com">
+    <link rel="preconnect" href="//fonts.gstatic.com" crossorigin>
+    <link href="//fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+ 
+    <link rel="stylesheet" href="styles/index.css">
+
+
+    <script src="//accounts.google.com/gsi/client" async defer></script>
+        
+     -->
+
+
+    <link rel="preconnect" href="//fonts.googleapis.com">
+    <link rel="preconnect" href="//fonts.gstatic.com" crossorigin>
+    <link href="//fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles/index.css">
+    <script src="//accounts.google.com/gsi/client" async defer></script>
     <style>
         .modal-switch-text {
             text-align: center;
@@ -416,10 +500,13 @@ function getDoctorShift($dept) {
         </div>
 
         <div class="dashboard__grid">
-            <!-- Card 1: Register Account -->
+            
             <div class="card" id="openRegisterModal" role="button" tabindex="0">
                 <div>
                     <div class="card__icon card__icon--blue">
+            <!--<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                </svg>-->
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
                         </svg>
@@ -434,6 +521,9 @@ function getDoctorShift($dept) {
             <div class="card" id="openScheduleModal" role="button" tabindex="0">
                 <div>
                     <div class="card__icon card__icon--teal">
+            <!--<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>-->
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
@@ -588,9 +678,9 @@ function getDoctorShift($dept) {
                         </div>
                     </div>
 
-                    <div style="display:flex; gap:1rem; margin-top:1.5rem;">
+                    <div style="display:flex; gap:1rem;">
                         <button type="submit" class="btn btn--primary" style="flex:1;">Create Account</button>
-                        <button type="button" class="btn btn--outline" data-close="registerModal" style="flex:1;">Cancel</button>
+                        
                     </div>
                 </form>
 

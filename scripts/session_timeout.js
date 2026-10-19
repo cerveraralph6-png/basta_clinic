@@ -1,5 +1,5 @@
  let inactivityTimeout;
-        const INACTIVITY_LIMIT = 120000; // 2 minutes
+        const INACTIVITY_LIMIT = 120000; 
 
         function resetInactivityTimer() {
             clearTimeout(inactivityTimeout);
